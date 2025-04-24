@@ -425,7 +425,7 @@
 // //   }
 // // });
 
-// const GEMINI_API_KEY = "AIzaSyAjiPCuBtp8NW06-MFpaM4ZOWJs6WGoR7Y"; // Replace with your key
+// const GEMINI_API_KEY = ""; // Replace with your key
 
 // // Handle API requests from content scripts
 // chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
