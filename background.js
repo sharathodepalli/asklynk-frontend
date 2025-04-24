@@ -696,7 +696,7 @@
 
 //   // Gemini API handler
 //   if (message.type === 'GEMINI_API_REQUEST') {
-//     const GEMINI_API_KEY = "AIzaSyAjiPCuBtp8NW06-MFpaM4ZOWJs6WGoR7Y"; // Replace with your key
+//     const GEMINI_API_KEY = ""; // Replace with your key
 //     const payload = message.payload;
     
 //     // Use correct model name: gemini-1.5-pro-002
