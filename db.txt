@@ -1,0 +1,393 @@
+Hi! I've uploaded the files of my project. I want to implement an anonymous messaging dashboard for classroom interaction between students and professors.
+
+Here’s what I want:
+
+🎯 Goal:
+To build a dashboard for professors that displays questions asked by students during a session — both anonymous and identified ones — and allows professors to mark them as resolved.
+
+🔧 Features:
+On Student Side:
+
+Students should be able to ask questions during the session.
+There should be a toggle to choose between:
+Normal Mode (shows student’s name)
+Anonymous Mode (hides identity)
+If Anonymous Mode is selected:
+Assign a random name/alias to each student for the entire session, so the same student has the same alias throughout.
+When a question is submitted:
+Use AI to check if it’s relevant to the class context.
+If relevant → allow posting.
+If not → show a warning like: “Please stay on topic and ask questions relevant to the current session.”
+On Professor Side (Dashboard):
+
+A dashboard UI that shows:
+List of questions asked (anonymous or named).
+Each question’s priority, based on how relevant it is to the class/session topic.
+A checkbox or checkmark next to each question to mark it as “Done”.
+🧠 Smart Features:
+Use context of the session or lecture (could be a description, transcript, or title) to judge the relevance of each question.
+Prioritize questions based on their relevance and importance to the ongoing lecture.
+Please review the uploaded code and guide me or help implement this functionality in my existing project.
+
+create table public.anonymous_identities (
+  id uuid not null default gen_random_uuid (),
+  session_id uuid not null,
+  user_id uuid not null,
+  anonymous_name text not null,
+  created_at timestamp with time zone null default now(),
+  constraint anonymous_identities_pkey primary key (id),
+  constraint anonymous_identities_session_id_anonymous_name_key unique (session_id, anonymous_name),
+  constraint anonymous_identities_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE,
+  constraint anonymous_identities_user_id_fkey foreign KEY (user_id) references profiles (id)
+) TABLESPACE pg_default;
+
+create index IF not exists idx_anonymous_identities_session_id on public.anonymous_identities using btree (session_id) TABLESPACE pg_default;
+
+create index IF not exists idx_anonymous_identities_user_id on public.anonymous_identities using btree (user_id) TABLESPACE pg_default;
+
+create table public.chat_messages (
+  id uuid not null default gen_random_uuid (),
+  session_id uuid not null,
+  user_id uuid not null,
+  content text not null,
+  type public.message_type not null default 'public'::message_type,
+  votes integer null default 0,
+  created_at timestamp with time zone null default now(),
+  status public.message_status null default 'sent'::message_status,
+  delivered_at timestamp with time zone null,
+  read_at timestamp with time zone null,
+  constraint chat_messages_pkey primary key (id),
+  constraint chat_messages_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE,
+  constraint chat_messages_user_id_fkey foreign KEY (user_id) references profiles (id)
+) TABLESPACE pg_default;
+
+create index IF not exists chat_messages_session_id_idx on public.chat_messages using btree (session_id) TABLESPACE pg_default;
+
+create index IF not exists chat_messages_user_id_idx on public.chat_messages using btree (user_id) TABLESPACE pg_default;
+
+create index IF not exists chat_messages_created_at_idx on public.chat_messages using btree (created_at) TABLESPACE pg_default;
+
+create index IF not exists idx_chat_messages_status on public.chat_messages using btree (status) TABLESPACE pg_default;
+
+create index IF not exists idx_chat_messages_delivery on public.chat_messages using btree (delivered_at) TABLESPACE pg_default
+where
+  (delivered_at is null);
+
+create index IF not exists idx_chat_messages_read on public.chat_messages using btree (read_at) TABLESPACE pg_default
+where
+  (read_at is null);
+
+create index IF not exists idx_chat_messages_composite on public.chat_messages using btree (session_id, created_at desc) TABLESPACE pg_default;
+
+create index IF not exists idx_chat_messages_type on public.chat_messages using btree (type) TABLESPACE pg_default;
+
+create index IF not exists idx_chat_messages_anonymous on public.chat_messages using btree (session_id, type) TABLESPACE pg_default
+where
+  (type = 'anonymous'::message_type);
+
+create trigger message_status_update_trigger BEFORE
+update on chat_messages for EACH row when (
+  new.delivered_at is distinct from old.delivered_at
+  or new.read_at is distinct from old.read_at
+)
+execute FUNCTION handle_message_status ();
+
+create trigger message_status_trigger BEFORE
+update on chat_messages for EACH row
+execute FUNCTION update_message_status ();
+
+create trigger message_count_trigger
+after INSERT on chat_messages for EACH row
+execute FUNCTION update_message_counts ();
+
+create trigger anonymous_message_trigger
+after INSERT on chat_messages for EACH row when (new.type = 'anonymous'::message_type)
+execute FUNCTION handle_anonymous_message ();
+
+create table public.messages (
+  id uuid not null default gen_random_uuid (),
+  session_id uuid not null,
+  user_id uuid not null,
+  type public.message_type not null,
+  content text not null,
+  votes integer null default 0,
+  created_at timestamp with time zone null default now(),
+  status public.message_status null default 'sent'::message_status,
+  delivered_at timestamp with time zone null,
+  read_at timestamp with time zone null,
+  anonymous_name text null,
+  constraint messages_temp_pkey1 primary key (id),
+  constraint messages_temp_session_id_fkey1 foreign KEY (session_id) references sessions (id) on delete CASCADE,
+  constraint messages_temp_user_id_fkey1 foreign KEY (user_id) references profiles (id)
+) TABLESPACE pg_default;
+
+create index IF not exists messages_user_id_idx on public.messages using btree (user_id) TABLESPACE pg_default;
+
+create index IF not exists messages_session_id_idx on public.messages using btree (session_id) TABLESPACE pg_default;
+
+create index IF not exists messages_created_at_idx on public.messages using btree (created_at) TABLESPACE pg_default;
+
+create index IF not exists messages_type_idx on public.messages using btree (type) TABLESPACE pg_default;
+
+create index IF not exists messages_status_idx on public.messages using btree (status) TABLESPACE pg_default;
+
+create trigger message_status_update BEFORE
+update on messages for EACH row
+execute FUNCTION update_message_status ();
+
+create view public.messages_with_users as
+select
+  m.id,
+  m.session_id,
+  m.user_id,
+  m.type,
+  m.content,
+  m.votes,
+  m.created_at,
+  m.status,
+  m.delivered_at,
+  m.read_at,
+  m.anonymous_name,
+  case
+    when m.type = 'anonymous'::message_type then COALESCE(m.anonymous_name, 'Anonymous'::text)
+    else p.full_name
+  end as display_name,
+  p.full_name as user_full_name,
+  p.role as user_role
+from
+  messages m
+  left join profiles p on m.user_id = p.id;
+
+  create table public.poll_votes (
+  id uuid not null default gen_random_uuid (),
+  poll_id uuid not null,
+  user_id uuid not null,
+  option_index integer not null,
+  created_at timestamp with time zone null default now(),
+  constraint poll_votes_pkey primary key (id),
+  constraint poll_votes_poll_id_user_id_key unique (poll_id, user_id),
+  constraint poll_votes_poll_id_fkey foreign KEY (poll_id) references polls (id) on delete CASCADE,
+  constraint poll_votes_user_id_fkey foreign KEY (user_id) references auth.users (id)
+) TABLESPACE pg_default;
+
+create table public.polls (
+  id uuid not null default gen_random_uuid (),
+  session_id uuid not null,
+  question text not null,
+  options jsonb not null default '[]'::jsonb,
+  status public.poll_status null default 'active'::poll_status,
+  created_at timestamp with time zone null default now(),
+  ended_at timestamp with time zone null,
+  constraint polls_pkey primary key (id),
+  constraint polls_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create table public.private_messages (
+  id uuid not null default gen_random_uuid (),
+  session_id uuid not null,
+  sender_id uuid not null,
+  receiver_id uuid not null,
+  content text not null,
+  type text not null,
+  status text not null default 'sent'::text,
+  created_at timestamp with time zone null default now(),
+  read_at timestamp with time zone null,
+  delivered_at timestamp with time zone null,
+  anonymous_name text null,
+  anonymous_thread_id uuid null,
+  constraint private_messages_pkey primary key (id),
+  constraint private_messages_receiver_id_fkey foreign KEY (receiver_id) references profiles (id),
+  constraint private_messages_sender_id_fkey foreign KEY (sender_id) references profiles (id),
+  constraint private_messages_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE,
+  constraint private_messages_status_check check (
+    (
+      status = any (
+        array['sent'::text, 'delivered'::text, 'read'::text]
+      )
+    )
+  ),
+  constraint private_messages_type_check check (
+    (
+      type = any (array['private'::text, 'anonymous'::text])
+    )
+  )
+) TABLESPACE pg_default;
+
+create index IF not exists idx_private_messages_lookup on public.private_messages using btree (session_id, type, sender_id, receiver_id) TABLESPACE pg_default;
+
+create index IF not exists idx_private_messages_thread on public.private_messages using btree (anonymous_thread_id, created_at desc) TABLESPACE pg_default;
+
+create table public.profiles (
+  id uuid not null,
+  full_name text not null,
+  role public.user_role not null,
+  created_at timestamp with time zone null default now(),
+  constraint profiles_pkey primary key (id),
+  constraint profiles_id_fkey foreign KEY (id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create table public.session_analytics (
+  id uuid not null default gen_random_uuid (),
+  session_id uuid not null,
+  student_count integer null default 0,
+  message_count integer null default 0,
+  ai_interaction_count integer null default 0,
+  poll_count integer null default 0,
+  anonymous_message_count integer null default 0,
+  updated_at timestamp with time zone null default now(),
+  constraint session_analytics_pkey primary key (id),
+  constraint session_analytics_session_id_unique unique (session_id),
+  constraint session_analytics_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists session_analytics_session_id_idx on public.session_analytics using btree (session_id) TABLESPACE pg_default;
+
+create index IF not exists session_analytics_updated_at_idx on public.session_analytics using btree (updated_at) TABLESPACE pg_default;
+create view public.session_history as
+select
+  s.id,
+  s.code,
+  s.professor_id,
+  s.title,
+  s.status,
+  s.created_at,
+  s.ended_at,
+  s.description,
+  s.metadata,
+  COALESCE(sa.student_count, 0) as student_count,
+  COALESCE(sa.message_count, 0) as message_count,
+  COALESCE(sa.ai_interaction_count, 0) as ai_interaction_count,
+  COALESCE(sa.poll_count, 0) as poll_count,
+  COALESCE(sa.anonymous_message_count, 0) as anonymous_message_count
+from
+  sessions s
+  left join session_analytics sa on sa.session_id = s.id
+order by
+  s.created_at desc;
+
+  create table public.session_summaries (
+  id uuid not null default gen_random_uuid (),
+  session_id uuid not null,
+  content text not null,
+  created_at timestamp with time zone not null default now(),
+  constraint session_summaries_pkey primary key (id),
+  constraint session_summaries_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_session_summaries_lookup on public.session_summaries using btree (session_id, created_at desc) TABLESPACE pg_default;
+
+create table public.session_transcripts (
+  id uuid not null default gen_random_uuid (),
+  session_id uuid not null,
+  speaker_id uuid not null,
+  content text not null,
+  timestamp timestamp with time zone not null default now(),
+  language text not null default 'en-US'::text,
+  constraint session_transcripts_pkey primary key (id),
+  constraint session_transcripts_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE,
+  constraint session_transcripts_speaker_id_fkey foreign KEY (speaker_id) references profiles (id),
+  constraint valid_language check ((length(language) > 0))
+) TABLESPACE pg_default;
+
+create index IF not exists idx_session_transcripts_lookup on public.session_transcripts using btree (session_id, speaker_id, "timestamp") TABLESPACE pg_default;
+
+create index IF not exists idx_session_transcripts_timestamp on public.session_transcripts using btree ("timestamp" desc) TABLESPACE pg_default;
+
+create table public.sessions (
+  id uuid not null default gen_random_uuid (),
+  code text not null,
+  professor_id uuid not null,
+  title text not null,
+  status public.session_status null default 'active'::session_status,
+  created_at timestamp with time zone null default now(),
+  ended_at timestamp with time zone null,
+  description text null,
+  metadata jsonb null default '{}'::jsonb,
+  constraint sessions_pkey primary key (id),
+  constraint sessions_code_key unique (code),
+  constraint sessions_professor_id_fkey foreign KEY (professor_id) references auth.users (id)
+) TABLESPACE pg_default;
+
+create trigger session_analytics_trigger
+after INSERT on sessions for EACH row
+execute FUNCTION update_session_analytics ();
+
+create trigger session_end_trigger
+after
+update on sessions for EACH row when (
+  old.status = 'active'::session_status
+  and new.status = 'ended'::session_status
+)
+execute FUNCTION handle_session_end ();
+
+create table public.student_sessions (
+  id uuid not null default gen_random_uuid (),
+  session_id uuid not null,
+  student_id uuid not null,
+  joined_at timestamp with time zone null default now(),
+  constraint student_sessions_pkey primary key (id),
+  constraint student_sessions_session_id_student_id_key unique (session_id, student_id),
+  constraint student_sessions_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE,
+  constraint student_sessions_student_id_fkey foreign KEY (student_id) references profiles (id)
+) TABLESPACE pg_default;
+
+create index IF not exists idx_student_sessions_lookup on public.student_sessions using btree (session_id, student_id) TABLESPACE pg_default;
+
+create index IF not exists idx_student_sessions_session on public.student_sessions using btree (session_id) TABLESPACE pg_default;
+
+create index IF not exists idx_student_sessions_student on public.student_sessions using btree (student_id, joined_at desc) TABLESPACE pg_default;
+
+create table public.typing_status (
+  session_id uuid not null,
+  user_id uuid not null,
+  is_typing boolean not null default false,
+  updated_at timestamp with time zone not null default now(),
+  constraint typing_status_pkey primary key (session_id, user_id),
+  constraint typing_status_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE,
+  constraint typing_status_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_typing_status_lookup on public.typing_status using btree (session_id, user_id, is_typing, updated_at desc) TABLESPACE pg_default;
+
+create trigger tr_cleanup_typing_status
+after INSERT on typing_status for EACH STATEMENT
+execute FUNCTION trigger_cleanup_typing_status ();
+
+create table public.user_ai_chats (
+  id uuid not null default gen_random_uuid (),
+  user_id uuid not null,
+  session_id uuid not null,
+  store_chat boolean not null default true,
+  created_at timestamp with time zone not null default now(),
+  updated_at timestamp with time zone not null default now(),
+  constraint user_ai_chats_pkey primary key (id),
+  constraint user_ai_chats_user_id_session_id_key unique (user_id, session_id),
+  constraint user_ai_chats_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE,
+  constraint user_ai_chats_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_user_ai_chats_lookup on public.user_ai_chats using btree (user_id, session_id, store_chat) TABLESPACE pg_default;
+
+create index IF not exists idx_user_ai_chats_analytics on public.user_ai_chats using btree (session_id, created_at desc) TABLESPACE pg_default;
+
+create trigger tr_update_session_ai_analytics
+after INSERT on user_ai_chats for EACH row
+execute FUNCTION update_session_ai_analytics ();
+create table public.user_ai_messages (
+  id uuid not null default gen_random_uuid (),
+  chat_id uuid not null,
+  role text not null,
+  content text not null,
+  created_at timestamp with time zone not null default now(),
+  constraint user_ai_messages_pkey primary key (id),
+  constraint user_ai_messages_chat_id_fkey foreign KEY (chat_id) references user_ai_chats (id) on delete CASCADE,
+  constraint user_ai_messages_role_check check (
+    (
+      role = any (array['user'::text, 'assistant'::text])
+    )
+  )
+) TABLESPACE pg_default;
+
+create index IF not exists idx_user_ai_messages_chat on public.user_ai_messages using btree (chat_id, role, created_at) TABLESPACE pg_default;
+
+create index IF not exists idx_user_ai_messages_role_lookup on public.user_ai_messages using btree (chat_id, role, created_at desc) TABLESPACE pg_default;

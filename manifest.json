@@ -1,0 +1,41 @@
+{
+    "manifest_version": 2,
+    "name": "AskLynkk Chat Extension",
+    "version": "1.0",
+    "description": "A chatbot extension integration",
+    "permissions": [
+      "storage",
+      "activeTab",
+      "tabs",
+      "http://localhost:3000/*",
+      "http://localhost:5173/*"
+    ],
+    "host_permissions": [
+    "http://localhost:3000/*",
+    "http://localhost:5173/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
+    "externally_connectable": {
+      "matches": ["http://localhost:3000/*"]
+    },
+    "background": {
+      "scripts": ["background.js"],
+      "persistent": false
+    },
+    "browser_action": {
+      "default_popup": "popup.html",
+      "default_icon": "icon/icon.png"
+    },
+    "content_scripts": [
+      {
+        "matches": ["https://meet.google.com/*", "https://*.instructure.com/*"],
+        "js": ["content.js"]
+      }
+    ],
+    "icons": {
+      "16": "icon/icon16.png",
+      "48": "icon/icon48.png",
+      "128": "icon/icon128.png"
+    },
+    "content_security_policy": "script-src 'self'; object-src 'self'"
+  }
