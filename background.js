@@ -877,7 +877,7 @@ let currentAuthState = {
 // API endpoint configuration
 const API_BASE_URL = 'http://localhost:3000';
 const AUTH_PAGE_URL = 'http://localhost:5173';
-const GEMINI_API_KEY = "AIzaSyAjiPCuBtp8NW06-MFpaM4ZOWJs6WGoR7Y";
+const GEMINI_API_KEY =  "AIzaSyAjiPCuBtp8NW06-MFpaM4ZOWJs6WGoR7Y"; // Replace with your key
 
 // Check storage on initialization
 chrome.storage.local.get(['authState'], (result) => {
@@ -900,29 +900,58 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // Open authentication page
+    // In background.js - modify the existing listener
   if (message.type === 'OPEN_AUTH_PAGE') {
-    // Store the original tab ID and URL before redirecting
-    chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-      if (tabs && tabs[0]) {
+    console.log('Background script received OPEN_AUTH_PAGE message');
+    try {
+      // Store the original tab ID and URL before redirecting
+      chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+        if (!tabs || tabs.length === 0) {
+          console.error('No active tab found');
+          sendResponse({ success: false, error: 'No active tab found' });
+          return;
+        }
+        
         const originalTab = tabs[0];
+        console.log('Current tab info:', originalTab.id, originalTab.url);
+        
         // Store the original tab information
         chrome.storage.local.set({
           originalTabInfo: {
             tabId: originalTab.id,
             url: originalTab.url
           }
+        }, () => {
+          if (chrome.runtime.lastError) {
+            console.error('Error storing tab info:', chrome.runtime.lastError);
+            sendResponse({ success: false, error: 'Failed to store tab info' });
+            return;
+          }
+          
+          // Construct auth URL
+          const authUrl = `${AUTH_PAGE_URL}/?extension=true&returnUrl=${encodeURIComponent(originalTab.url)}`;
+          console.log('Opening auth page URL:', authUrl);
+          
+          // Open the authentication page
+          chrome.tabs.create({ url: authUrl }, (newTab) => {
+            if (chrome.runtime.lastError) {
+              console.error('Error creating new tab:', chrome.runtime.lastError);
+              sendResponse({ success: false, error: 'Failed to create tab' });
+              return;
+            }
+            
+            console.log('Created new tab with ID:', newTab.id);
+            sendResponse({ success: true });
+          });
         });
-
-        // Open the authentication page
-        chrome.tabs.create({ 
-          url: `${AUTH_PAGE_URL}/?extension=true&returnUrl=${encodeURIComponent(originalTab.url)}`
-        });
-      }
-    });
-    sendResponse({ success: true });
-    return true;
+      });
+    } catch (error) {
+      console.error('Error in OPEN_AUTH_PAGE handler:', error);
+      sendResponse({ success: false, error: error.message });
+    }
+    
+    return true; // Keep the message channel open for async response
   }
-
   // Set authentication state
   if (message.type === 'SET_AUTH') {
     // Update auth state with user and token

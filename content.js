@@ -647,7 +647,12 @@ function showAuthRequiredMessage() {
   if (signinBtn) {
     signinBtn.addEventListener('click', () => {
       console.log('Opening authentication page');
-      chrome.runtime.sendMessage({ type: 'OPEN_AUTH_PAGE' });
+      chrome.runtime.sendMessage({ type: 'OPEN_AUTH_PAGE' }, (response) => {
+        console.log('Response from background script:', response);
+        if (chrome.runtime.lastError) {
+          console.error('Error sending message:', chrome.runtime.lastError);
+        }
+      });
       messageContainer.remove();
     });
     
