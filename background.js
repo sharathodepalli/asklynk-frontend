@@ -877,7 +877,7 @@ let currentAuthState = {
 // API endpoint configuration
 const API_BASE_URL = 'http://localhost:3000';
 const AUTH_PAGE_URL = 'http://localhost:5173';
-const GEMINI_API_KEY =  "AIzaSyAjiPCuBtp8NW06-MFpaM4ZOWJs6WGoR7Y"; // Replace with your key
+const GEMINI_API_KEY = ""; // REMOVED - Use environment variables instead
 
 // Check storage on initialization
 chrome.storage.local.get(['authState'], (result) => {

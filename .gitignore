@@ -1,0 +1,36 @@
+# Environment variables (contains sensitive API keys)
+.env
+.env.local
+.env.development
+.env.production
+
+# Node modules
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+
+# API keys and secrets (backup protection)
+**/secrets.js
+**/config/keys.js
+**/*secret*
+**/*key*.js
