@@ -595,12 +595,44 @@ sendAIQuestion() → makeEnhancedBackendRequest() → direct fetch() to backend
 // Check AI Assistant status and get troubleshooting info
 checkAIAssistantStatus();
 
-// Test AI request manually
-testAIRequest("Hello, this is a test");
+// Check session and user context
+checkSessionContext();
 
-// View AI context and message history
+// Test enhanced backend connection
+testEnhancedBackend();
+
+// View AI context and message history (if using old system)
 console.log("AI Context:", geminiContext);
 ```
+
+**Common AI Assistant Error Messages:**
+
+1. **"🚫 No active session found"**
+
+   - **Cause**: `currentSessionId` is null
+   - **Solution**: Join or create a session first
+   - **Debug**: Run `checkSessionContext()` to verify
+
+2. **"🔑 Authentication required"**
+
+   - **Cause**: User not logged in or authentication token missing
+   - **Solution**: Log in through the extension
+   - **Debug**: Run `checkAIAssistantStatus()` to verify user status
+
+3. **"401 Unauthorized"**
+
+   - **Cause**: Invalid or expired authentication token
+   - **Solution**: Log out and log back in
+   - **Debug**: Check Network tab for authentication headers
+
+4. **"403 Access denied"**
+
+   - **Cause**: User doesn't have permission for this session
+   - **Solution**: Verify you're a member of the session
+
+5. **"404 Session not found"**
+   - **Cause**: Session may have ended or doesn't exist
+   - **Solution**: Create a new session or join an active one
 
 ### Voice Capture Issues
 

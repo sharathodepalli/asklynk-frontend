@@ -8127,23 +8127,63 @@ async function makeEnhancedBackendRequest(question) {
     userId: currentUser?.id
   });
 
+  // Validation checks
+  if (!currentSessionId) {
+    throw new Error('🚫 No active session found. Please join or create a session first to use the AI Assistant.');
+  }
+
+  if (!currentUser) {
+    throw new Error('🔑 Please log in to use the AI Assistant.');
+  }
+
   try {
+    // Get user session token for authentication
+    const userToken = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'GET_USER_SESSION_TOKEN' }, (response) => {
+        resolve(response?.token);
+      });
+    });
+
+    // Prepare headers with authentication
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+
+    // Add authentication header if token is available
+    if (userToken) {
+      headers['Authorization'] = `Bearer ${userToken}`;
+    }
+
     const response = await fetch(`http://localhost:3000/api/enhanced/sessions/${currentSessionId}/ask`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: headers,
       body: JSON.stringify({
         sessionId: currentSessionId,
         question: question,
-        userId: currentUser?.id || 'anonymous-' + Date.now(),
-        studentName: currentUser?.username || currentUser?.full_name || 'Anonymous Student'
+        userId: currentUser.id,
+        studentName: currentUser.username || currentUser.full_name || 'Anonymous Student'
       })
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(`Backend request failed: ${errorData.message || response.statusText}`);
+      let errorMessage = `Backend request failed: ${response.statusText}`;
+      
+      if (response.status === 401) {
+        errorMessage = '🔑 Authentication required. Please log in and try again.';
+      } else if (response.status === 403) {
+        errorMessage = '🚫 Access denied. You may not have permission to access this session.';
+      } else if (response.status === 404) {
+        errorMessage = '📂 Session not found. Please check if the session is still active.';
+      } else {
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.message || errorMessage;
+        } catch (e) {
+          // Use default error message if JSON parsing fails
+        }
+      }
+      
+      throw new Error(errorMessage);
     }
 
     const result = await response.json();
@@ -8186,8 +8226,48 @@ function summarizeContext(messages) {
 async function sendAIQuestion(question) {
   console.log('🎓 Processing AI question:', question);
   
-  // Show loading state
+  // Early validation checks
   const aiMessages = document.getElementById('lynkk-ai-messages');
+  
+  if (!currentSessionId) {
+    const errorMessage = document.createElement('div');
+    errorMessage.className = 'lynkk-ai-message lynkk-ai-error';
+    errorMessage.innerHTML = `
+      <div class="lynkk-ai-avatar">⚠️</div>
+      <div class="lynkk-ai-content">
+        <div class="lynkk-error-text">
+          🚫 No active session found. Please join or create a session first to use the AI Assistant.
+        </div>
+        <div class="lynkk-ai-metadata">
+          <small>Session validation - ${new Date().toLocaleTimeString()}</small>
+        </div>
+      </div>
+    `;
+    aiMessages.appendChild(errorMessage);
+    aiMessages.scrollTop = aiMessages.scrollHeight;
+    return;
+  }
+
+  if (!currentUser) {
+    const errorMessage = document.createElement('div');
+    errorMessage.className = 'lynkk-ai-message lynkk-ai-error';
+    errorMessage.innerHTML = `
+      <div class="lynkk-ai-avatar">🔑</div>
+      <div class="lynkk-ai-content">
+        <div class="lynkk-error-text">
+          Please log in to use the AI Assistant.
+        </div>
+        <div class="lynkk-ai-metadata">
+          <small>Authentication required - ${new Date().toLocaleTimeString()}</small>
+        </div>
+      </div>
+    `;
+    aiMessages.appendChild(errorMessage);
+    aiMessages.scrollTop = aiMessages.scrollHeight;
+    return;
+  }
+  
+  // Show loading state
   const loadingMessage = document.createElement('div');
   loadingMessage.className = 'lynkk-ai-message lynkk-ai-loading';
   loadingMessage.innerHTML = `
@@ -10416,3 +10496,79 @@ function testAnonymousDashboard() {
 
 // Expose to console for manual testing
 window.testAnonymousDashboard = testAnonymousDashboard;
+
+// ================================
+// DEBUG HELPER FUNCTIONS FOR AI ASSISTANT
+// ================================
+
+/**
+ * Debug function to check AI Assistant status
+ */
+function checkAIAssistantStatus() {
+  console.log('🔍 AI Assistant Status Check:');
+  console.log('- currentSessionId:', currentSessionId || '❌ Not set');
+  console.log('- currentUser:', currentUser || '❌ Not set');
+  console.log('- AI functions available:', {
+    enhanced: typeof makeEnhancedBackendRequest === 'function',
+    send: typeof sendAIQuestion === 'function'
+  });
+  
+  if (currentSessionId && currentUser) {
+    console.log('✅ AI Assistant ready for use');
+  } else {
+    console.log('⚠️ AI Assistant not ready - missing session or user');
+  }
+  
+  return {
+    sessionId: currentSessionId,
+    user: currentUser,
+    ready: !!(currentSessionId && currentUser)
+  };
+}
+
+/**
+ * Debug function to check session context
+ */
+function checkSessionContext() {
+  console.log('📋 Session Context:');
+  console.log('- Session ID:', currentSessionId || 'None');
+  console.log('- User:', currentUser ? `${currentUser.username || currentUser.full_name} (${currentUser.role})` : 'Not logged in');
+  console.log('- AI Tab Available:', !!document.getElementById('lynkk-ai-messages'));
+  
+  return {
+    sessionId: currentSessionId,
+    user: currentUser,
+    aiTabExists: !!document.getElementById('lynkk-ai-messages')
+  };
+}
+
+/**
+ * Debug function to test enhanced backend connection
+ */
+async function testEnhancedBackend() {
+  console.log('🧪 Testing Enhanced Backend Connection...');
+  
+  if (!currentSessionId) {
+    console.error('❌ Cannot test - no active session');
+    return { success: false, error: 'No active session' };
+  }
+  
+  if (!currentUser) {
+    console.error('❌ Cannot test - user not logged in');
+    return { success: false, error: 'User not logged in' };
+  }
+  
+  try {
+    const response = await makeEnhancedBackendRequest('Test connection to enhanced backend');
+    console.log('✅ Backend connection successful:', response);
+    return { success: true, response };
+  } catch (error) {
+    console.error('❌ Backend connection failed:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Make debug functions globally available
+window.checkAIAssistantStatus = checkAIAssistantStatus;
+window.checkSessionContext = checkSessionContext;
+window.testEnhancedBackend = testEnhancedBackend;
