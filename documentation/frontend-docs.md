@@ -12,9 +12,13 @@ The AI assistant provides smart educational support:
 
 ### 5. Voice Capture & Transcript Processing
 
-The voice capture system automatically records and processes live lecture content:
+The Smart Continuous Voice Capture system automatically records and processes live lecture content with intelligent handling of natural speech patterns:
 
-- **Real-time Speech Recognition**: Uses Web Speech Recognition API for live transcription
+- **Smart Continuous Recognition**: Never stops due to silence - automatically restarts after any interruption
+- **Intelligent Gap Handling**: Handles natural lecture pauses (questions, demonstrations, thinking breaks)
+- **Exponential Backoff Restart**: Smart error recovery with progressive delay increases
+- **Manual Pause/Resume Control**: Professors can pause and resume capture as needed
+- **Activity Monitoring**: Tracks voice activity and notifies about prolonged silence without stopping
 - **Chunked Processing**: Processes voice in 7-second intervals for optimal performance
 - **Background Embeddings**: Converts transcript chunks to vector embeddings for semantic search
 - **Database Storage**: Stores transcripts with session context for future retrieval
@@ -115,21 +119,43 @@ asklynk/
 ### Voice Capture System
 
 ```javascript
-// Initialize voice capture functionality
+// Initialize smart continuous voice capture functionality
 function initializeVoiceCapture() {
-  // Sets up Web Speech Recognition API with continuous listening
-  // Processes speech in 7-second chunks for optimal performance
+  // Sets up Web Speech Recognition API with intelligent restart mechanisms
+  // Handles errors with exponential backoff and never stops due to silence
 }
 
-// Start recording voice for transcription
-function startRecording() {
-  // Begins continuous speech recognition
-  // Automatically chunks and processes transcript data
+// Start smart continuous recording for lectures
+function startVoiceCapture(sessionId) {
+  // Begins continuous speech recognition with smart gap handling
+  // Automatically processes transcript data and handles natural pauses
 }
 
-// Stop voice recording
-function stopRecording() {
-  // Stops speech recognition and processing
+// Manually pause voice capture during breaks
+function pauseVoiceCapture() {
+  // Pauses capture temporarily - can be resumed when professor continues
+}
+
+// Resume voice capture after manual pause
+function resumeVoiceCapture() {
+  // Resumes from pause with full restart capabilities
+}
+
+// Stop voice recording completely
+function stopVoiceCapture() {
+  // Stops speech recognition and cleans up all resources
+}
+
+// Smart restart with exponential backoff
+function scheduleVoiceRecognitionRestart(reason) {
+  // Intelligently restarts voice recognition after errors or interruptions
+  // Uses exponential backoff to prevent infinite restart loops
+}
+
+// Monitor for prolonged silence without stopping
+function startSilenceMonitoring() {
+  // Tracks voice activity and notifies about long silence periods
+  // Never automatically stops - only suggests manual pause
 }
 
 // Send transcript chunk to backend for embedding generation
@@ -528,6 +554,33 @@ Common voice capture error messages:
 "✅ EXCELLENT: Using USER SESSION token - will save to database!";
 "⚠️ WARNING: Using ANONYMOUS key - transcripts won't be saved!";
 ```
+
+**Smart Continuous Capture Debug Commands** (run in browser console):
+
+```javascript
+// Check current voice capture state
+checkVoiceCaptureState();
+
+// View configuration settings
+checkVoiceCaptureConfig();
+
+// Manual pause during long break
+manualPauseVoiceCapture();
+
+// Resume after break
+manualResumeVoiceCapture();
+
+// Force restart if issues occur
+forceRestartVoiceCapture();
+```
+
+**Handling Lecture Scenarios**:
+
+- **Student Questions**: System continues listening through pauses and student interaction
+- **Board Writing**: Captures speech even during long silent periods while writing
+- **Demonstrations**: Automatically restarts if recognition stops during hands-on activities
+- **Break Time**: Professors can manually pause and resume as needed
+- **Technical Issues**: Smart exponential backoff prevents restart loops
 
 ### Database Storage Issues
 

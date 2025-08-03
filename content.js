@@ -24,13 +24,26 @@ let currentSessionId = null;
 let lastTranscriptTime = 0;
 const TRANSCRIPT_DEBOUNCE_TIME = 1000; // 1 second debounce
 
-// Enhanced voice capture with chunked processing
+// Enhanced voice capture with chunked processing and intelligent restart
 let voiceTranscriptBuffer = '';
 let bufferStartTime = 0;
 const CHUNK_DURATION = 7000; // 7 seconds per chunk
 let chunkTimer = null;
 let consecutiveSilenceCount = 0;
-const MAX_SILENCE_CHUNKS = 3; // Stop after 3 silent chunks
+let voiceActivityDetected = false;
+let lastVoiceActivityTime = 0;
+let restartAttempts = 0;
+let isManuallyPaused = false;
+
+// Smart voice capture configuration
+const VOICE_CAPTURE_CONFIG = {
+  MAX_RESTART_ATTEMPTS: 5,            // Maximum consecutive restart attempts
+  RESTART_DELAY_BASE: 1000,           // Base delay between restarts (ms)
+  RESTART_DELAY_MAX: 10000,           // Maximum delay between restarts (ms)
+  ACTIVITY_TIMEOUT: 300000,           // 5 minutes - maximum silence before suggesting pause
+  SILENCE_NOTIFICATION_THRESHOLD: 120000, // 2 minutes - notify about prolonged silence
+  NEVER_STOP_ON_SILENCE: true         // Never automatically stop due to silence
+};
 
 // ==================== UTILITY FUNCTIONS ====================
 
@@ -358,7 +371,12 @@ function initializeVoiceCapture() {
     let finalTranscript = '';
     let interimTranscript = '';
     
-    console.log('Voice recognition onresult triggered, results count:', event.results.length);
+    console.log('🎤 Voice recognition onresult triggered, results count:', event.results.length);
+    
+    // Mark voice activity detected
+    voiceActivityDetected = true;
+    lastVoiceActivityTime = Date.now();
+    restartAttempts = 0; // Reset restart attempts on successful speech
     
     // Process all results from the last result index
     for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -366,26 +384,26 @@ function initializeVoiceCapture() {
       
       if (event.results[i].isFinal) {
         finalTranscript += transcript;
-        console.log('Final transcript detected:', transcript);
+        console.log('🎯 Final transcript detected:', transcript);
       } else {
         interimTranscript += transcript;
-        console.log('Interim transcript:', transcript);
+        console.log('🔄 Interim transcript:', transcript);
       }
     }
     
     // Add final transcript to buffer
     if (finalTranscript.trim()) {
-      console.log('Adding final transcript to buffer:', finalTranscript.trim());
+      console.log('📝 Adding final transcript to buffer:', finalTranscript.trim());
       addToTranscriptBuffer(finalTranscript.trim());
       consecutiveSilenceCount = 0; // Reset silence counter on speech
     }
     
     // Update UI with current recognition status
-    updateVoiceRecognitionUI(interimTranscript);
+    updateVoiceRecognitionUI(interimTranscript || 'Listening... (speech detected)');
   };
   
   voiceRecognition.onerror = (event) => {
-    console.error('Speech recognition error:', event.error);
+    console.error('🚨 Speech recognition error:', event.error);
     
     switch (event.error) {
       case 'not-allowed':
@@ -393,53 +411,52 @@ function initializeVoiceCapture() {
         stopVoiceCapture();
         break;
       case 'no-speech':
-        console.log('No speech detected, continuing...');
+        console.log('⏸️ No speech detected, but continuing to listen...');
         consecutiveSilenceCount++;
+        // Don't stop - just log the silence
         break;
       case 'network':
-        showToast('Network error during voice recognition. Retrying...', 'error');
-        // Auto-retry after network error
-        setTimeout(() => {
-          if (isVoiceCapturing) {
-            restartVoiceRecognition();
-          }
-        }, 2000);
+        showToast('Network error during voice recognition. Auto-retrying...', 'warning');
+        // Auto-retry after network error with exponential backoff
+        scheduleVoiceRecognitionRestart('network error');
+        break;
+      case 'aborted':
+        console.log('🔄 Speech recognition aborted, restarting...');
+        scheduleVoiceRecognitionRestart('aborted');
+        break;
+      case 'audio-capture':
+        showToast('Audio capture error. Check microphone connection.', 'error');
+        scheduleVoiceRecognitionRestart('audio capture error');
         break;
       default:
-        console.warn('Speech recognition error:', event.error);
+        console.warn('⚠️ Speech recognition error:', event.error);
+        scheduleVoiceRecognitionRestart(`unknown error: ${event.error}`);
     }
   };
   
   voiceRecognition.onend = () => {
-    console.log('Voice recognition ended');
+    console.log('🔚 Voice recognition ended');
     
-    // Auto-restart if still capturing and not too many consecutive silent chunks
-    if (isVoiceCapturing && currentSessionId && consecutiveSilenceCount < MAX_SILENCE_CHUNKS) {
-      setTimeout(() => {
-        if (isVoiceCapturing) {
-          try {
-            voiceRecognition.start();
-          } catch (error) {
-            console.error('Error restarting voice recognition:', error);
-            // Try to restart after a longer delay
-            setTimeout(() => {
-              if (isVoiceCapturing) {
-                restartVoiceRecognition();
-              }
-            }, 5000);
-          }
-        }
-      }, 100);
-    } else if (consecutiveSilenceCount >= MAX_SILENCE_CHUNKS) {
-      console.log('Stopping voice capture due to prolonged silence');
-      stopVoiceCapture();
-      showToast('Voice capture paused due to silence. Click to restart.', 'info');
+    // NEVER stop automatically due to silence - always restart unless manually paused
+    if (isVoiceCapturing && currentSessionId && !isManuallyPaused) {
+      console.log('🔄 Auto-restarting voice recognition for continuous capture...');
+      scheduleVoiceRecognitionRestart('normal end event');
+    } else if (isManuallyPaused) {
+      console.log('⏸️ Voice recognition paused manually');
+      updateVoiceRecognitionUI('Paused - Click to resume');
+    } else {
+      console.log('❌ Voice recognition stopped (capture disabled or no session)');
+      updateVoiceRecognitionUI('Stopped');
     }
   };
   
   voiceRecognition.onstart = () => {
-    console.log('Voice recognition started');
-    updateVoiceRecognitionUI('Listening...');
+    console.log('🎤 Voice recognition started successfully');
+    restartAttempts = 0; // Reset restart attempts on successful start
+    updateVoiceRecognitionUI('Listening for voice...');
+    
+    // Start monitoring for prolonged silence
+    startSilenceMonitoring();
   };
   
   return true;
@@ -617,12 +634,69 @@ window.checkCurrentTokenType = async function() {
 window.checkVoiceCaptureState = function() {
   console.log('🔍 Voice Capture State Check:');
   console.log('- isVoiceCapturing:', isVoiceCapturing);
+  console.log('- isManuallyPaused:', isManuallyPaused);
   console.log('- currentSessionId:', currentSessionId);
   console.log('- voiceRecognition:', voiceRecognition);
   console.log('- voiceTranscriptBuffer:', voiceTranscriptBuffer);
   console.log('- bufferStartTime:', bufferStartTime);
   console.log('- chunkTimer:', chunkTimer);
+  console.log('- voiceActivityDetected:', voiceActivityDetected);
+  console.log('- lastVoiceActivityTime:', lastVoiceActivityTime ? new Date(lastVoiceActivityTime).toLocaleTimeString() : 'Never');
+  console.log('- restartAttempts:', restartAttempts);
   console.log('- currentUser:', currentUser);
+  
+  const timeSinceActivity = lastVoiceActivityTime ? Date.now() - lastVoiceActivityTime : 0;
+  console.log('- Time since last activity:', Math.floor(timeSinceActivity / 1000), 'seconds');
+};
+
+/**
+ * Manual pause function for debugging/testing
+ */
+window.manualPauseVoiceCapture = function() {
+  console.log('🧪 Manually pausing voice capture...');
+  pauseVoiceCapture();
+};
+
+/**
+ * Manual resume function for debugging/testing
+ */
+window.manualResumeVoiceCapture = function() {
+  console.log('🧪 Manually resuming voice capture...');
+  resumeVoiceCapture();
+};
+
+/**
+ * Force restart voice recognition for debugging
+ */
+window.forceRestartVoiceCapture = function() {
+  console.log('🧪 Force restarting voice recognition...');
+  
+  if (!isVoiceCapturing) {
+    console.error('❌ Voice capture is not active');
+    return;
+  }
+  
+  restartAttempts = 0;
+  scheduleVoiceRecognitionRestart('manual force restart');
+};
+
+/**
+ * Check voice capture configuration
+ */
+window.checkVoiceCaptureConfig = function() {
+  console.log('⚙️ Voice Capture Configuration:');
+  console.log(VOICE_CAPTURE_CONFIG);
+  console.log('');
+  console.log('📊 Current Performance:');
+  console.log('- Restart attempts:', restartAttempts);
+  console.log('- Manual pause:', isManuallyPaused);
+  console.log('- Activity detected:', voiceActivityDetected);
+  
+  if (lastVoiceActivityTime) {
+    const timeSince = Date.now() - lastVoiceActivityTime;
+    console.log('- Time since activity:', Math.floor(timeSince / 1000), 'seconds');
+    console.log('- Activity timestamp:', new Date(lastVoiceActivityTime).toLocaleTimeString());
+  }
 };
 
 /**
@@ -640,6 +714,160 @@ function restartVoiceRecognition() {
     }, 1000);
   } catch (error) {
     console.error('Error in restartVoiceRecognition:', error);
+  }
+}
+
+/**
+ * Smart restart scheduler with exponential backoff for voice recognition
+ * @param {string} reason - Reason for restart (for logging)
+ */
+function scheduleVoiceRecognitionRestart(reason) {
+  if (!isVoiceCapturing || !currentSessionId || isManuallyPaused) {
+    console.log('🚫 Skipping restart - capture disabled, no session, or manually paused');
+    return;
+  }
+  
+  // Prevent infinite restart loops
+  if (restartAttempts >= VOICE_CAPTURE_CONFIG.MAX_RESTART_ATTEMPTS) {
+    console.warn('⚠️ Max restart attempts reached, waiting longer before retry...');
+    restartAttempts = 0; // Reset for next cycle
+    setTimeout(() => {
+      if (isVoiceCapturing && !isManuallyPaused) {
+        scheduleVoiceRecognitionRestart('retry after max attempts');
+      }
+    }, VOICE_CAPTURE_CONFIG.RESTART_DELAY_MAX);
+    return;
+  }
+  
+  restartAttempts++;
+  
+  // Calculate exponential backoff delay
+  const delay = Math.min(
+    VOICE_CAPTURE_CONFIG.RESTART_DELAY_BASE * Math.pow(2, restartAttempts - 1),
+    VOICE_CAPTURE_CONFIG.RESTART_DELAY_MAX
+  );
+  
+  console.log(`🔄 Scheduling voice recognition restart #${restartAttempts} due to: ${reason} (delay: ${delay}ms)`);
+  
+  setTimeout(() => {
+    if (isVoiceCapturing && !isManuallyPaused && voiceRecognition) {
+      try {
+        console.log(`🎤 Attempting restart #${restartAttempts}...`);
+        voiceRecognition.start();
+      } catch (error) {
+        console.error('❌ Error during scheduled restart:', error);
+        // Try again with longer delay
+        setTimeout(() => {
+          if (isVoiceCapturing && !isManuallyPaused) {
+            scheduleVoiceRecognitionRestart('restart error recovery');
+          }
+        }, delay * 2);
+      }
+    }
+  }, delay);
+}
+
+/**
+ * Start monitoring for prolonged silence and notify user
+ */
+function startSilenceMonitoring() {
+  // Clear any existing monitoring
+  if (window.silenceMonitorInterval) {
+    clearInterval(window.silenceMonitorInterval);
+  }
+  
+  let lastNotificationTime = 0;
+  
+  window.silenceMonitorInterval = setInterval(() => {
+    if (!isVoiceCapturing || isManuallyPaused) {
+      clearInterval(window.silenceMonitorInterval);
+      return;
+    }
+    
+    const now = Date.now();
+    const timeSinceLastActivity = now - lastVoiceActivityTime;
+    
+    // Notify about prolonged silence (but don't stop)
+    if (timeSinceLastActivity > VOICE_CAPTURE_CONFIG.SILENCE_NOTIFICATION_THRESHOLD && 
+        now - lastNotificationTime > VOICE_CAPTURE_CONFIG.SILENCE_NOTIFICATION_THRESHOLD) {
+      
+      const minutes = Math.floor(timeSinceLastActivity / 60000);
+      console.log(`🔕 ${minutes} minutes of silence detected, but continuing to listen...`);
+      
+      showToast(`Voice capture active - ${minutes}min of silence. Still listening...`, 'info', 5000);
+      lastNotificationTime = now;
+    }
+    
+    // Optional: suggest manual pause after very long silence
+    if (timeSinceLastActivity > VOICE_CAPTURE_CONFIG.ACTIVITY_TIMEOUT &&
+        now - lastNotificationTime > VOICE_CAPTURE_CONFIG.ACTIVITY_TIMEOUT) {
+      
+      const minutes = Math.floor(timeSinceLastActivity / 60000);
+      console.log(`⏸️ Suggesting manual pause after ${minutes} minutes of silence`);
+      
+      showToast(
+        `Voice capture has been quiet for ${minutes} minutes. Consider pausing to save resources.`,
+        'warning',
+        8000
+      );
+      lastNotificationTime = now;
+    }
+    
+  }, 30000); // Check every 30 seconds
+}
+
+/**
+ * Manually pause voice capture (professor can resume when ready)
+ */
+function pauseVoiceCapture() {
+  console.log('⏸️ Manually pausing voice capture');
+  
+  isManuallyPaused = true;
+  
+  if (voiceRecognition) {
+    try {
+      voiceRecognition.stop();
+    } catch (error) {
+      console.error('Error pausing voice recognition:', error);
+    }
+  }
+  
+  // Clear silence monitoring
+  if (window.silenceMonitorInterval) {
+    clearInterval(window.silenceMonitorInterval);
+  }
+  
+  updateVoiceRecognitionUI('Paused - Click to resume');
+  showToast('Voice capture paused. Click to resume when ready.', 'info');
+  
+  // Update UI to show resume button
+  showVoiceRecordingIndicator(false, true); // false for recording, true for paused
+}
+
+/**
+ * Resume voice capture from manual pause
+ */
+function resumeVoiceCapture() {
+  console.log('▶️ Resuming voice capture from manual pause');
+  
+  if (!isVoiceCapturing || !currentSessionId) {
+    console.error('Cannot resume - voice capture not active or no session');
+    return;
+  }
+  
+  isManuallyPaused = false;
+  restartAttempts = 0;
+  lastVoiceActivityTime = Date.now(); // Reset activity timer
+  
+  try {
+    if (voiceRecognition) {
+      voiceRecognition.start();
+      showVoiceRecordingIndicator(true, false); // true for recording, false for paused
+      showToast('Voice capture resumed', 'success');
+    }
+  } catch (error) {
+    console.error('Error resuming voice recognition:', error);
+    scheduleVoiceRecognitionRestart('resume error');
   }
 }
 
@@ -674,32 +902,40 @@ function startVoiceCapture(sessionId) {
   }
   
   try {
-    // Set session state
+    // Reset smart capture state
     currentSessionId = sessionId;
     isVoiceCapturing = true;
+    isManuallyPaused = false;
     consecutiveSilenceCount = 0;
+    voiceActivityDetected = false;
+    lastVoiceActivityTime = Date.now();
+    restartAttempts = 0;
     resetTranscriptBuffer();
+    
+    console.log('🎯 Starting smart continuous voice capture...');
     
     // Request microphone permission and start recognition
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then(() => {
-        console.log('Microphone permission granted');
+        console.log('🎤 Microphone permission granted');
         voiceRecognition.start();
-        console.log('Voice capture started for session:', sessionId);
-        showVoiceRecordingIndicator(true);
-        showToast('Voice capture started - speaking will be transcribed', 'success');
+        console.log('✅ Voice capture started for session:', sessionId);
+        showVoiceRecordingIndicator(true, false);
+        showToast('Smart voice capture started - will continuously listen during lecture', 'success');
       })
       .catch((error) => {
-        console.error('Microphone permission denied:', error);
+        console.error('❌ Microphone permission denied:', error);
         isVoiceCapturing = false;
+        isManuallyPaused = false;
         currentSessionId = null;
         showToast('Microphone access required for voice capture', 'error');
       });
       
     return true;
   } catch (error) {
-    console.error('Error starting voice capture:', error);
+    console.error('❌ Error starting voice capture:', error);
     isVoiceCapturing = false;
+    isManuallyPaused = false;
     currentSessionId = null;
     showToast('Failed to start voice capture: ' + error.message, 'error');
     return false;
@@ -710,7 +946,7 @@ function startVoiceCapture(sessionId) {
  * Stop voice capture with proper cleanup
  */
 function stopVoiceCapture() {
-  console.log('Stopping voice capture');
+  console.log('🛑 Stopping voice capture');
   
   if (!isVoiceCapturing) {
     return;
@@ -718,55 +954,72 @@ function stopVoiceCapture() {
   
   // Process any remaining transcript in buffer
   if (voiceTranscriptBuffer.trim()) {
-    console.log('Processing final transcript chunk before stopping');
+    console.log('📝 Processing final transcript chunk before stopping');
     processTranscriptChunk();
   }
   
-  // Stop recognition
+  // Stop recognition and reset all state
   isVoiceCapturing = false;
+  isManuallyPaused = false;
   currentSessionId = null;
   consecutiveSilenceCount = 0;
+  voiceActivityDetected = false;
+  lastVoiceActivityTime = 0;
+  restartAttempts = 0;
   resetTranscriptBuffer();
+  
+  // Clear silence monitoring
+  if (window.silenceMonitorInterval) {
+    clearInterval(window.silenceMonitorInterval);
+    window.silenceMonitorInterval = null;
+  }
   
   if (voiceRecognition) {
     try {
       voiceRecognition.stop();
     } catch (error) {
-      console.error('Error stopping voice recognition:', error);
+      console.error('❌ Error stopping voice recognition:', error);
     }
   }
   
   // Update UI
-  showVoiceRecordingIndicator(false);
+  showVoiceRecordingIndicator(false, false);
   updateVoiceRecognitionUI('');
   
-  console.log('Voice capture stopped');
+  console.log('✅ Voice capture stopped completely');
   showToast('Voice capture stopped', 'info');
 }
 
 /**
- * Show/hide voice recording indicator in UI
+ * Show/hide voice recording indicator in UI with pause/resume support
  * @param {boolean} show - Whether to show the indicator
+ * @param {boolean} isPaused - Whether the capture is paused (optional)
  */
-function showVoiceRecordingIndicator(show) {
+function showVoiceRecordingIndicator(show, isPaused = false) {
   // Remove existing indicator
   const existingIndicator = document.getElementById('lynkk-voice-indicator');
   if (existingIndicator) {
     existingIndicator.remove();
   }
   
-  if (!show) {
+  if (!show && !isPaused) {
     return;
   }
   
   // Create voice recording indicator
   const indicator = document.createElement('div');
   indicator.id = 'lynkk-voice-indicator';
+  
+  // Different styles for recording vs paused states
+  const isActive = show && !isPaused;
+  const bgColor = isActive ? 'linear-gradient(135deg, #ef4444, #dc2626)' : 'linear-gradient(135deg, #f59e0b, #d97706)';
+  const shadowColor = isActive ? 'rgba(239, 68, 68, 0.4)' : 'rgba(245, 158, 11, 0.4)';
+  
   indicator.style.cssText = `
     position: fixed;
     top: 20px;
     right: 20px;
-    background: linear-gradient(135deg, #ef4444, #dc2626);
+    background: ${bgColor};
     color: white;
     padding: 8px 16px;
     border-radius: 20px;
@@ -776,14 +1029,28 @@ function showVoiceRecordingIndicator(show) {
     display: flex;
     align-items: center;
     gap: 8px;
-    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
-    animation: lynkk-pulse 2s infinite;
+    box-shadow: 0 4px 12px ${shadowColor};
+    animation: ${isActive ? 'lynkk-pulse 2s infinite' : 'none'};
+    cursor: pointer;
+    transition: all 0.3s ease;
   `;
   
-  indicator.innerHTML = `
-    <div style="width: 8px; height: 8px; background: white; border-radius: 50%; animation: lynkk-blink 1s infinite;"></div>
-    Recording Voice
-  `;
+  // Different content for recording vs paused
+  if (isActive) {
+    indicator.innerHTML = `
+      <div style="width: 8px; height: 8px; background: white; border-radius: 50%; animation: lynkk-blink 1s infinite;"></div>
+      Recording Voice
+      <div style="font-size: 10px; opacity: 0.7; margin-left: 4px;">📱 Tap to pause</div>
+    `;
+    indicator.title = 'Smart voice capture active - Click to pause';
+  } else if (isPaused) {
+    indicator.innerHTML = `
+      <div style="width: 8px; height: 8px; background: white; border-radius: 50%;"></div>
+      Voice Paused
+      <div style="font-size: 10px; opacity: 0.7; margin-left: 4px;">▶️ Tap to resume</div>
+    `;
+    indicator.title = 'Voice capture paused - Click to resume';
+  }
   
   // Add CSS animations if not already present
   if (!document.querySelector('#lynkk-voice-animations')) {
@@ -804,15 +1071,25 @@ function showVoiceRecordingIndicator(show) {
   
   document.body.appendChild(indicator);
   
-  // Add click handler to stop recording
+  // Add click handler for pause/resume/stop
   indicator.addEventListener('click', () => {
-    if (confirm('Stop voice capture for this session?')) {
-      stopVoiceCapture();
+    if (isPaused) {
+      // Resume from pause
+      resumeVoiceCapture();
+    } else if (isActive) {
+      // Show options: pause or stop
+      const action = confirm('Pause voice capture temporarily? (Cancel to stop completely)');
+      if (action) {
+        pauseVoiceCapture();
+      } else {
+        // User cancelled - ask if they want to stop
+        const stop = confirm('Stop voice capture completely for this session?');
+        if (stop) {
+          stopVoiceCapture();
+        }
+      }
     }
   });
-  
-  indicator.style.cursor = 'pointer';
-  indicator.title = 'Click to stop voice capture';
 }
 
 /**
