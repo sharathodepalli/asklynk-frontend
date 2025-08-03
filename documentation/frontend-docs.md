@@ -534,6 +534,74 @@ If API requests fail:
 - Check if authentication tokens are being properly passed
 - Ensure background script is handling API_REQUEST messages
 
+### AI Assistant Issues
+
+**Current Behavior When New Users Try AI Assistant:**
+
+1. **Error 429 (Quota Exceeded)**: Most common issue due to Gemini API free tier limits
+
+   - **Symptoms**: AI requests fail with "You exceeded your current quota" message
+   - **User Impact**: AI Assistant appears broken while other features work fine
+   - **Root Cause**: Google Gemini API has strict rate limits on free tier accounts
+
+2. **What Still Works During AI Issues**:
+   - ✅ Voice capture continues normally
+   - ✅ Anonymous questions function perfectly
+   - ✅ Session management works
+   - ✅ All other extension features active
+
+**Enhanced Error Handling (New Implementation):**
+
+```javascript
+// AI Assistant now provides clear error messages:
+"🚫 AI Assistant Temporarily Unavailable
+
+The Enhanced AI service is currently experiencing issues.
+
+What's still working:
+✅ Voice capture continues normally
+✅ Anonymous questions work fine
+✅ Session features are active
+
+To resolve:
+• Wait a moment and try again
+• Check your internet connection
+• Use other extension features while waiting"
+```
+
+**Upgraded AI Backend Integration:**
+
+The extension now uses an enhanced backend instead of directly calling Gemini API:
+
+- **Enhanced Backend Endpoint**: `/api/enhanced/sessions/{sessionId}/ask`
+- **Context-Aware Responses**: Uses session embeddings for relevant answers
+- **Relevance Filtering**: Automatically filters off-topic questions
+- **Cost-Effective**: ~$0.00005 per question vs Gemini's quota limits
+- **Better Error Handling**: Clear messages for different error types
+
+**New AI Request Flow:**
+
+```javascript
+// Old Gemini API flow:
+sendAIQuestion() → makeGeminiRequest() → chrome.runtime.sendMessage()
+
+// New Enhanced Backend flow:
+sendAIQuestion() → makeEnhancedBackendRequest() → direct fetch() to backend
+```
+
+**New Debug Commands for AI Issues** (run in browser console):
+
+```javascript
+// Check AI Assistant status and get troubleshooting info
+checkAIAssistantStatus();
+
+// Test AI request manually
+testAIRequest("Hello, this is a test");
+
+// View AI context and message history
+console.log("AI Context:", geminiContext);
+```
+
 ### Voice Capture Issues
 
 If voice capture doesn't work:

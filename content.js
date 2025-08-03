@@ -700,6 +700,77 @@ window.checkVoiceCaptureConfig = function() {
 };
 
 /**
+ * Test AI Assistant status and provide troubleshooting info
+ */
+window.checkAIAssistantStatus = function() {
+  console.log('🤖 AI Assistant Status Check:');
+  console.log('');
+  
+  // Check if Gemini context is initialized
+  console.log('📋 Context Status:');
+  console.log('- Session ID:', geminiContext.sessionId || 'Not set');
+  console.log('- Session Title:', geminiContext.sessionTitle || 'Not set');
+  console.log('- Message History:', geminiContext.messages.length, 'messages');
+  
+  console.log('');
+  console.log('🔧 Troubleshooting Common AI Issues:');
+  console.log('');
+  console.log('❌ Error 429 (Quota Exceeded):');
+  console.log('  • This is a Gemini API limit, not an extension bug');
+  console.log('  • Voice capture continues working normally');
+  console.log('  • Wait 60+ seconds and try again');
+  console.log('  • Consider upgrading to Gemini Pro for higher limits');
+  console.log('');
+  console.log('❌ Authentication Issues:');
+  console.log('  • Check if GEMINI_API_KEY is set correctly');
+  console.log('  • Verify API key has proper permissions');
+  console.log('');
+  console.log('✅ What Still Works:');
+  console.log('  • Voice capture and transcription');
+  console.log('  • Anonymous questions');
+  console.log('  • Session management');
+  console.log('  • All other extension features');
+  
+  return {
+    contextInitialized: !!geminiContext.sessionId,
+    messageCount: geminiContext.messages.length,
+    sessionActive: !!currentSessionId
+  };
+};
+
+/**
+ * Test function to manually try AI request (for debugging)
+ */
+window.testAIRequest = async function(question = "Hello, this is a test message") {
+  console.log('🧪 Testing AI request manually...');
+  
+  if (!geminiContext.sessionId) {
+    console.error('❌ No session context. Please start or join a session first.');
+    return;
+  }
+  
+  try {
+    console.log('📤 Sending test question:', question);
+    
+    const contextPrompt = `You are an AI teaching assistant for the session "${geminiContext.sessionTitle}". 
+    Help students understand the material and answer their questions clearly.`;
+    
+    const response = await makeGeminiRequest(question, contextPrompt);
+    console.log('✅ AI Response received:', response.substring(0, 100) + '...');
+    return response;
+  } catch (error) {
+    console.error('❌ AI Request failed:', error.message);
+    
+    if (error.message.includes('429') || error.message.includes('quota')) {
+      console.log('💡 This is a quota limit issue - wait and try again');
+      console.log('💡 Voice capture continues working normally');
+    }
+    
+    return null;
+  }
+};
+
+/**
  * Restart voice recognition with error handling
  */
 function restartVoiceRecognition() {
@@ -8045,74 +8116,48 @@ function initGeminiContext(session) {
 }
 
 /**
- * Sends a question to the Gemini API
+ * Makes a request to the Enhanced Backend API with session context
  * @param {string} question - The user's question
- * @param {string} contextPrompt - Context prompt for the AI
- * @returns {Promise<string>} The AI response
+ * @returns {Promise<Object>} The AI response from enhanced backend
  */
-async function makeGeminiRequest(question, contextPrompt) {
-  // Using the correct format with roles
-  const payload = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: contextPrompt }
-        ]
-      },
-      {
-        role: "model",
-        parts: [
-          { text: "I understand. I'll help students with their questions about the class session, providing clear explanations and using markdown formatting when it helps clarify the content." }
-        ]
-      },
-      {
-        role: "user",
-        parts: [
-          { text: question }
-        ]
-      }
-    ],
-    generationConfig: {
-      temperature: 0.7,
-      topK: 40,
-      topP: 0.95,
-      maxOutputTokens: 800,
-    }
-  };
-  
+async function makeEnhancedBackendRequest(question) {
+  console.log('🚀 Sending request to Enhanced Backend:', {
+    question: question,
+    sessionId: currentSessionId,
+    userId: currentUser?.id
+  });
+
   try {
-    console.log('Sending Gemini request with payload:', payload);
-    
-    // Make the API request through the background script
-    const response = await new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        type: 'GEMINI_API_REQUEST',
-        payload
-      }, result => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else if (!result || !result.success) {
-          reject(new Error((result && result.error) || 'API request failed'));
-        } else {
-          resolve(result.data);
-        }
-      });
+    const response = await fetch(`http://localhost:3000/api/enhanced/sessions/${currentSessionId}/ask`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionId: currentSessionId,
+        question: question,
+        userId: currentUser?.id || 'anonymous-' + Date.now(),
+        studentName: currentUser?.username || currentUser?.full_name || 'Anonymous Student'
+      })
     });
-    
-    // Extract the response text
-    if (response.candidates && 
-        response.candidates.length > 0 && 
-        response.candidates[0].content && 
-        response.candidates[0].content.parts && 
-        response.candidates[0].content.parts.length > 0) {
-      
-      return response.candidates[0].content.parts[0].text;
-    } else {
-      throw new Error('Invalid response format from Gemini API');
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`Backend request failed: ${errorData.message || response.statusText}`);
     }
+
+    const result = await response.json();
+    
+    if (result.type && result.type !== 'success') {
+      // Handle LLM errors (relevance failed, etc.)
+      throw new Error(result.message || 'AI processing failed');
+    }
+
+    console.log('✅ Enhanced Backend Response:', result);
+    return result;
+
   } catch (error) {
-    console.error('Error making Gemini API request:', error);
+    console.error('❌ Enhanced Backend Error:', error);
     throw error;
   }
 }
@@ -8138,144 +8183,86 @@ function summarizeContext(messages) {
  * Sends an AI question and handles UI updates
  * @param {string} question - The user's question
  */
-function sendAIQuestion(question) {
-  // Show a loading indicator or message in the AI messages area
+async function sendAIQuestion(question) {
+  console.log('🎓 Processing AI question:', question);
+  
+  // Show loading state
   const aiMessages = document.getElementById('lynkk-ai-messages');
-  
-  // First, display the user's question
-  showAIMessage({
-    content: question,
-    isUser: true,
-    timestamp: new Date()
-  });
-  
-  // Add to context
-  geminiContext.messages.push({
-    role: 'user',
-    content: question
-  });
-  
-  // Show loading indicator
-  const loadingId = 'loading-' + Date.now();
-  const loadingElement = document.createElement('div');
-  loadingElement.className = 'lynkk-ai-message lynkk-bot';
-  loadingElement.id = loadingId;
-  loadingElement.innerHTML = `
-    <div class="lynkk-ai-bubble">
-      <div class="lynkk-ai-header">
-        <div class="lynkk-ai-sender">AI Assistant</div>
-        <div class="lynkk-ai-time">${formatTime(new Date())}</div>
-      </div>
-      <div class="lynkk-ai-text">
-        <div class="lynkk-typing-indicator">
-          <span></span><span></span><span></span>
-        </div>
-      </div>
+  const loadingMessage = document.createElement('div');
+  loadingMessage.className = 'lynkk-ai-message lynkk-ai-loading';
+  loadingMessage.innerHTML = `
+    <div class="lynkk-ai-avatar">🤖</div>
+    <div class="lynkk-ai-content">
+      <div class="lynkk-loading-dots">Thinking<span>.</span><span>.</span><span>.</span></div>
     </div>
   `;
-  
-  // Add typing indicator styles if not present
-  if (!document.querySelector('.lynkk-typing-style')) {
-    const style = document.createElement('style');
-    style.className = 'lynkk-typing-style';
-    style.textContent = `
-      .lynkk-typing-indicator {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-      }
-      
-      .lynkk-typing-indicator span {
-        width: 8px;
-        height: 8px;
-        background-color: #cbd5e1;
-        border-radius: 50%;
-        display: inline-block;
-        animation: lynkk-typing 1.4s infinite ease-in-out both;
-      }
-      
-      .lynkk-typing-indicator span:nth-child(1) {
-        animation-delay: 0s;
-      }
-      
-      .lynkk-typing-indicator span:nth-child(2) {
-        animation-delay: 0.2s;
-      }
-      
-      .lynkk-typing-indicator span:nth-child(3) {
-        animation-delay: 0.4s;
-      }
-      
-      @keyframes lynkk-typing {
-        0%, 80%, 100% { 
-          transform: scale(0.6);
-        }
-        40% { 
-          transform: scale(1);
-        }
-      }
+  aiMessages.appendChild(loadingMessage);
+  aiMessages.scrollTop = aiMessages.scrollHeight;
+
+  try {
+    // Call enhanced backend instead of Gemini
+    const response = await makeEnhancedBackendRequest(question);
+    
+    // Remove loading message
+    loadingMessage.remove();
+    
+    // Add user question to chat
+    const userMessage = document.createElement('div');
+    userMessage.className = 'lynkk-ai-message lynkk-ai-user';
+    userMessage.innerHTML = `
+      <div class="lynkk-ai-content">${question}</div>
+      <div class="lynkk-ai-avatar">👤</div>
     `;
-    document.head.appendChild(style);
-  }
-  
-  if (aiMessages) {
-    aiMessages.appendChild(loadingElement);
+    aiMessages.appendChild(userMessage);
+    
+    // Add AI response to chat
+    const aiMessage = document.createElement('div');
+    aiMessage.className = 'lynkk-ai-message lynkk-ai-assistant';
+    aiMessage.innerHTML = `
+      <div class="lynkk-ai-avatar">🤖</div>
+      <div class="lynkk-ai-content">
+        <div class="lynkk-ai-text">${response.answer}</div>
+        <div class="lynkk-ai-metadata">
+          <small>
+            Relevance: ${(response.relevanceCheck?.score * 100 || 0).toFixed(1)}% | 
+            Confidence: ${(response.confidence * 100 || 0).toFixed(1)}% | 
+            Model: ${response.model || 'Enhanced AI'}
+          </small>
+        </div>
+      </div>
+    `;
+    aiMessages.appendChild(aiMessage);
+    
+    // Scroll to bottom
     aiMessages.scrollTop = aiMessages.scrollHeight;
+    
+    console.log('✅ AI question processed successfully');
+    
+  } catch (error) {
+    // Remove loading message
+    loadingMessage.remove();
+    
+    // Show error message
+    const errorMessage = document.createElement('div');
+    errorMessage.className = 'lynkk-ai-message lynkk-ai-error';
+    errorMessage.innerHTML = `
+      <div class="lynkk-ai-avatar">⚠️</div>
+      <div class="lynkk-ai-content">
+        <div class="lynkk-error-text">
+          ${error.message.includes('off-topic') || error.message.includes('relevance') 
+            ? '🎯 ' + error.message 
+            : '❌ Sorry, the AI assistant is temporarily unavailable. Please try again in a moment.'}
+        </div>
+        <div class="lynkk-ai-metadata">
+          <small>Enhanced Backend - ${new Date().toLocaleTimeString()}</small>
+        </div>
+      </div>
+    `;
+    aiMessages.appendChild(errorMessage);
+    aiMessages.scrollTop = aiMessages.scrollHeight;
+    
+    console.error('❌ Error processing AI question:', error);
   }
-  
-  // Get session context
-  const contextPrompt = geminiContext.sessionTitle ? 
-    `You are an AI teaching assistant for the class session "${geminiContext.sessionTitle}". ${geminiContext.sessionDescription ? "Class description: " + geminiContext.sessionDescription : ""}` : 
-    "You are an AI teaching assistant helping a student.";
-  
-  // Make API request to Gemini
-  makeGeminiRequest(question, contextPrompt)
-    .then(response => {
-      // Remove loading indicator
-      const loadingElement = document.getElementById(loadingId);
-      if (loadingElement) {
-        loadingElement.remove();
-      }
-      
-      // Add to context
-      geminiContext.messages.push({
-        role: 'assistant',
-        content: response
-      });
-      
-      // Display the AI's response
-      showAIMessage({
-        content: response,
-        isUser: false,
-        timestamp: new Date()
-      });
-      
-      // Save the conversation to database
-      saveAIConversation(question, response)
-        .then(success => {
-          if (success) {
-            console.log('Conversation saved successfully');
-          } else {
-            console.warn('Failed to save conversation');
-          }
-        });
-    })
-    .catch(error => {
-      console.error('Error asking Gemini AI:', error);
-      
-      // Remove loading indicator
-      const loadingElement = document.getElementById(loadingId);
-      if (loadingElement) {
-        loadingElement.remove();
-      }
-      
-      // Show error message
-      showAIMessage({
-        content: "Sorry, I couldn't process your request right now. Please try again later.",
-        isUser: false,
-        timestamp: new Date()
-      });
-    });
 }
 /**
  * Formats a date object into a readable time string
@@ -8340,7 +8327,10 @@ function showAIMessage(message) {
   
   // Create message element
   const messageElement = document.createElement('div');
-  messageElement.className = message.isUser ? 'lynkk-ai-message lynkk-user' : 'lynkk-ai-message lynkk-bot';
+  const messageClass = message.isUser ? 'lynkk-ai-message lynkk-user' : 
+                      message.isError ? 'lynkk-ai-message lynkk-bot lynkk-error' : 
+                      'lynkk-ai-message lynkk-bot';
+  messageElement.className = messageClass;
   
   // Format the content with markdown if it's from the AI
   let formattedContent = message.content;
@@ -8350,13 +8340,24 @@ function showAIMessage(message) {
     formattedContent = parseMarkdown(message.content);
   }
   
+  // Choose appropriate icon and sender text
+  let senderIcon, senderText;
+  if (message.isUser) {
+    senderIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>';
+    senderText = 'You';
+  } else if (message.isError) {
+    senderIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>';
+    senderText = 'System Notice';
+  } else {
+    senderIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="14.31" y1="8" x2="20.05" y2="17.94"></line><line x1="9.69" y1="8" x2="21.17" y2="8"></line><line x1="7.38" y1="12" x2="13.12" y2="2.06"></line><line x1="9.69" y1="16" x2="3.95" y2="6.06"></line><line x1="14.31" y1="16" x2="2.83" y2="16"></line><line x1="16.62" y1="12" x2="10.88" y2="21.94"></line></svg>';
+    senderText = 'AI Assistant';
+  }
+  
   messageElement.innerHTML = `
-    <div class="lynkk-ai-bubble">
+    <div class="lynkk-ai-bubble ${message.isError ? 'lynkk-error-bubble' : ''}">
       <div class="lynkk-ai-header">
         <div class="lynkk-ai-sender">
-          ${message.isUser ? 
-            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg> You' : 
-            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="14.31" y1="8" x2="20.05" y2="17.94"></line><line x1="9.69" y1="8" x2="21.17" y2="8"></line><line x1="7.38" y1="12" x2="13.12" y2="2.06"></line><line x1="9.69" y1="16" x2="3.95" y2="6.06"></line><line x1="14.31" y1="16" x2="2.83" y2="16"></line><line x1="16.62" y1="12" x2="10.88" y2="21.94"></line></svg> AI Assistant'}
+          ${senderIcon} ${senderText}
         </div>
         <div class="lynkk-ai-time">${formatTime(message.timestamp || new Date())}</div>
       </div>
@@ -8480,6 +8481,23 @@ function addAIChatStyles() {
       color: #1f2937;
       border-bottom-left-radius: 4px;
       border-left: 3px solid #4f46e5;
+    }
+    
+    /* Error message styling */
+    .lynkk-error .lynkk-ai-bubble {
+      background-color: #fef2f2;
+      color: #b91c1c;
+      border-left: 3px solid #ef4444;
+    }
+    
+    .lynkk-error .lynkk-ai-header {
+      background-color: #fee2e2;
+      color: #b91c1c;
+      border-bottom: 1px solid #fecaca;
+    }
+    
+    .lynkk-error-bubble {
+      border: 1px solid #fecaca !important;
     }
     
     .lynkk-ai-header {
@@ -8625,6 +8643,33 @@ function addAIChatStyles() {
     
     .hljs-number {
       color: #0550ae;
+    }
+    
+    /* Enhanced Backend AI Styles */
+    .lynkk-ai-loading .lynkk-loading-dots span {
+      animation: loading-dots 1.4s infinite ease-in-out;
+    }
+
+    .lynkk-ai-loading .lynkk-loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+    .lynkk-ai-loading .lynkk-loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+    @keyframes loading-dots {
+      0%, 80%, 100% { opacity: 0; }
+      40% { opacity: 1; }
+    }
+
+    .lynkk-ai-metadata {
+      margin-top: 8px;
+      opacity: 0.7;
+      font-size: 11px;
+    }
+
+    .lynkk-ai-error {
+      border-left: 3px solid #ff6b6b;
+    }
+
+    .lynkk-ai-error .lynkk-ai-content {
+      background-color: #fff5f5;
     }
   `;
   document.head.appendChild(style);
