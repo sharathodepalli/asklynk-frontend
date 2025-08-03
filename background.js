@@ -1071,6 +1071,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Get user session token specifically for voice transcript API calls
+  if (message.type === 'GET_USER_SESSION_TOKEN') {
+    console.log('Getting user session token for voice transcript API...');
+    
+    // Check if we have a stored user session token (different from the current token)
+    chrome.storage.local.get(['userSessionToken'], (result) => {
+      if (result.userSessionToken) {
+        console.log('Found stored user session token:', result.userSessionToken.substring(0, 10) + '...');
+        sendResponse({ 
+          success: true, 
+          sessionToken: result.userSessionToken 
+        });
+      } else {
+        console.log('No user session token found, user needs to get proper Supabase session token');
+        sendResponse({ 
+          success: false, 
+          error: 'No user session token available. Please ensure login process stores the Supabase session token.' 
+        });
+      }
+    });
+    
+    return true; // Keep message channel open
+  }
+
+  // Set user session token for voice transcript API calls
+  if (message.type === 'SET_USER_SESSION_TOKEN') {
+    console.log('Setting user session token for voice transcript API...');
+    
+    if (message.sessionToken) {
+      chrome.storage.local.set({ userSessionToken: message.sessionToken }, () => {
+        console.log('User session token stored for voice API');
+        sendResponse({ success: true });
+      });
+    } else {
+      sendResponse({ success: false, error: 'No session token provided' });
+    }
+    
+    return true;
+  }
+
   // Handle API requests
  // Handle API requests
 if (message.type === 'API_REQUEST') {

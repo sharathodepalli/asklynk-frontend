@@ -17,6 +17,21 @@ let geminiContext = {
   messages: []
 };
 
+// Voice capture state variables
+let voiceRecognition = null;
+let isVoiceCapturing = false;
+let currentSessionId = null;
+let lastTranscriptTime = 0;
+const TRANSCRIPT_DEBOUNCE_TIME = 1000; // 1 second debounce
+
+// Enhanced voice capture with chunked processing
+let voiceTranscriptBuffer = '';
+let bufferStartTime = 0;
+const CHUNK_DURATION = 7000; // 7 seconds per chunk
+let chunkTimer = null;
+let consecutiveSilenceCount = 0;
+const MAX_SILENCE_CHUNKS = 3; // Stop after 3 silent chunks
+
 // ==================== UTILITY FUNCTIONS ====================
 
 
@@ -67,6 +82,112 @@ async function getAuthToken() {
     });
   });
 }
+
+/**
+ * Gets the user session token specifically for voice transcript API calls
+ * This should use the actual Supabase user session token, not the anon key
+ * @returns {Promise<string|null>} User session token or null if not authenticated
+ */
+async function getUserSessionToken() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'GET_USER_SESSION_TOKEN' }, (response) => {
+      if (response && response.success && response.sessionToken) {
+        console.log('✅ User session token retrieved for voice API');
+        resolve(response.sessionToken);
+      } else {
+        console.error('❌ Failed to retrieve user session token, falling back to regular auth token');
+        // Fallback to regular auth token
+        getAuthToken().then(resolve);
+      }
+    });
+  });
+}
+
+/**
+ * Store the user's Supabase session token for voice transcript API calls
+ * This should be called after successful Supabase authentication
+ * @param {string} sessionToken - The user's Supabase session access_token
+ */
+async function storeUserSessionToken(sessionToken) {
+  if (!sessionToken) {
+    console.error('❌ Cannot store empty session token');
+    return false;
+  }
+  
+  // Validate token format (should not be anon key)
+  if (sessionToken.includes('"role":"anon"')) {
+    console.error('❌ WRONG TOKEN: This is an anonymous key, not a user session token!');
+    console.error('❌ Expected user session token with role: "authenticated"');
+    return false;
+  }
+  
+  console.log('✅ Storing user session token for voice API:', sessionToken.substring(0, 20) + '...');
+  
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({
+      type: 'SET_USER_SESSION_TOKEN',
+      sessionToken: sessionToken
+    }, (response) => {
+      if (response && response.success) {
+        console.log('✅ User session token stored successfully');
+        resolve(true);
+      } else {
+        console.error('❌ Failed to store user session token:', response?.error);
+        resolve(false);
+      }
+    });
+  });
+}
+
+/**
+ * Get and store the proper Supabase user session token
+ * This function should be called after user successfully logs in
+ * Call this from browser console: getAndStoreSupabaseSessionToken()
+ */
+window.getAndStoreSupabaseSessionToken = async function() {
+  console.log('🔑 Getting Supabase user session token...');
+  
+  // Check if Supabase is available
+  if (typeof window.supabase === 'undefined') {
+    console.error('❌ Supabase not available. Please ensure Supabase client is loaded.');
+    console.log('💡 Alternative: Manually set token with setTestUserSessionToken("your_token_here")');
+    return;
+  }
+  
+  try {
+    // Get current session from Supabase
+    const { data: { session }, error } = await window.supabase.auth.getSession();
+    
+    if (error) {
+      console.error('❌ Error getting Supabase session:', error);
+      return;
+    }
+    
+    if (!session) {
+      console.error('❌ No active Supabase session found. Please log in first.');
+      return;
+    }
+    
+    if (!session.access_token) {
+      console.error('❌ No access token in session');
+      return;
+    }
+    
+    console.log('✅ Found Supabase session for user:', session.user.email);
+    console.log('✅ Session token:', session.access_token.substring(0, 20) + '...');
+    
+    // Store the user session token
+    const stored = await storeUserSessionToken(session.access_token);
+    
+    if (stored) {
+      console.log('🎉 SUCCESS: User session token stored! Voice transcripts will now use the correct token.');
+      console.log('🧪 Test voice capture now - it should save to database');
+    }
+    
+  } catch (error) {
+    console.error('❌ Error accessing Supabase session:', error);
+  }
+};
 
 /**
  * Checks the user's authentication state
@@ -209,6 +330,632 @@ function showToast(message, type = 'info') {
  */
 function formatAIResponse(text) {
   return text.replace(/\n/g, '<br>');
+}
+
+// ==================== VOICE CAPTURE FUNCTIONS ====================
+
+/**
+ * Initialize voice recognition for professor's speech capture with chunked processing
+ */
+function initializeVoiceCapture() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    console.warn('Speech recognition not supported in this browser');
+    showToast('Voice capture not supported in this browser', 'error');
+    return false;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  voiceRecognition = new SpeechRecognition();
+  
+  // Configure speech recognition for continuous chunked processing
+  voiceRecognition.continuous = true;
+  voiceRecognition.interimResults = true;
+  voiceRecognition.lang = 'en-US';
+  voiceRecognition.maxAlternatives = 1;
+  
+  // Handle speech recognition results with chunked processing
+  voiceRecognition.onresult = (event) => {
+    let finalTranscript = '';
+    let interimTranscript = '';
+    
+    console.log('Voice recognition onresult triggered, results count:', event.results.length);
+    
+    // Process all results from the last result index
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript;
+      
+      if (event.results[i].isFinal) {
+        finalTranscript += transcript;
+        console.log('Final transcript detected:', transcript);
+      } else {
+        interimTranscript += transcript;
+        console.log('Interim transcript:', transcript);
+      }
+    }
+    
+    // Add final transcript to buffer
+    if (finalTranscript.trim()) {
+      console.log('Adding final transcript to buffer:', finalTranscript.trim());
+      addToTranscriptBuffer(finalTranscript.trim());
+      consecutiveSilenceCount = 0; // Reset silence counter on speech
+    }
+    
+    // Update UI with current recognition status
+    updateVoiceRecognitionUI(interimTranscript);
+  };
+  
+  voiceRecognition.onerror = (event) => {
+    console.error('Speech recognition error:', event.error);
+    
+    switch (event.error) {
+      case 'not-allowed':
+        showToast('Microphone access denied. Please allow microphone permissions.', 'error');
+        stopVoiceCapture();
+        break;
+      case 'no-speech':
+        console.log('No speech detected, continuing...');
+        consecutiveSilenceCount++;
+        break;
+      case 'network':
+        showToast('Network error during voice recognition. Retrying...', 'error');
+        // Auto-retry after network error
+        setTimeout(() => {
+          if (isVoiceCapturing) {
+            restartVoiceRecognition();
+          }
+        }, 2000);
+        break;
+      default:
+        console.warn('Speech recognition error:', event.error);
+    }
+  };
+  
+  voiceRecognition.onend = () => {
+    console.log('Voice recognition ended');
+    
+    // Auto-restart if still capturing and not too many consecutive silent chunks
+    if (isVoiceCapturing && currentSessionId && consecutiveSilenceCount < MAX_SILENCE_CHUNKS) {
+      setTimeout(() => {
+        if (isVoiceCapturing) {
+          try {
+            voiceRecognition.start();
+          } catch (error) {
+            console.error('Error restarting voice recognition:', error);
+            // Try to restart after a longer delay
+            setTimeout(() => {
+              if (isVoiceCapturing) {
+                restartVoiceRecognition();
+              }
+            }, 5000);
+          }
+        }
+      }, 100);
+    } else if (consecutiveSilenceCount >= MAX_SILENCE_CHUNKS) {
+      console.log('Stopping voice capture due to prolonged silence');
+      stopVoiceCapture();
+      showToast('Voice capture paused due to silence. Click to restart.', 'info');
+    }
+  };
+  
+  voiceRecognition.onstart = () => {
+    console.log('Voice recognition started');
+    updateVoiceRecognitionUI('Listening...');
+  };
+  
+  return true;
+}
+
+/**
+ * Add transcript to buffer and manage chunked processing
+ * @param {string} transcript - The new transcript to add
+ */
+function addToTranscriptBuffer(transcript) {
+  const now = Date.now();
+  
+  // Initialize buffer timing if this is the first transcript
+  if (!bufferStartTime) {
+    bufferStartTime = now;
+    startChunkTimer();
+  }
+  
+  // Add transcript to buffer with spacing
+  if (voiceTranscriptBuffer) {
+    voiceTranscriptBuffer += ' ' + transcript;
+  } else {
+    voiceTranscriptBuffer = transcript;
+  }
+  
+  console.log('Added to buffer:', transcript);
+  console.log('Current buffer length:', voiceTranscriptBuffer.length);
+  
+  // Check if buffer is getting too long (safety measure)
+  if (voiceTranscriptBuffer.length > 1000) {
+    console.log('Buffer getting too long, processing early');
+    processTranscriptChunk();
+  }
+}
+
+/**
+ * Start timer for chunk processing
+ */
+function startChunkTimer() {
+  console.log('⏰ Starting chunk timer for', CHUNK_DURATION / 1000, 'seconds');
+  
+  if (chunkTimer) {
+    clearTimeout(chunkTimer);
+    console.log('⏰ Cleared existing timer');
+  }
+  
+  chunkTimer = setTimeout(() => {
+    console.log('⏰ Timer expired, processing chunk');
+    processTranscriptChunk();
+  }, CHUNK_DURATION);
+}
+
+/**
+ * Process and send the current transcript chunk
+ */
+async function processTranscriptChunk() {
+  console.log('processTranscriptChunk called, buffer content:', voiceTranscriptBuffer);
+  
+  if (!voiceTranscriptBuffer.trim()) {
+    console.log('Empty buffer, skipping chunk processing');
+    resetTranscriptBuffer();
+    return;
+  }
+  
+  const chunkToProcess = voiceTranscriptBuffer.trim();
+  console.log('Processing transcript chunk:', chunkToProcess);
+  console.log('Chunk length:', chunkToProcess.length);
+  
+  // Reset buffer for next chunk
+  resetTranscriptBuffer();
+  
+  // Send to backend for processing and embedding generation
+  try {
+    console.log('Calling sendTranscriptToBackend with:', chunkToProcess.substring(0, 50) + '...');
+    await sendTranscriptToBackend(chunkToProcess);
+  } catch (error) {
+    console.error('Error processing transcript chunk:', error);
+    // Could implement retry logic here
+  }
+}
+
+/**
+ * Reset transcript buffer and timing
+ */
+function resetTranscriptBuffer() {
+  voiceTranscriptBuffer = '';
+  bufferStartTime = 0;
+  if (chunkTimer) {
+    clearTimeout(chunkTimer);
+    chunkTimer = null;
+  }
+}
+
+/**
+ * Test function to manually trigger voice transcript sending
+ * Can be called from browser console: testVoiceTranscriptSending()
+ */
+window.testVoiceTranscriptSending = async function() {
+  console.log('🧪 Testing voice transcript sending...');
+  
+  if (!currentSessionId) {
+    console.error('❌ No active session ID. Please start a session first.');
+    return;
+  }
+  
+  const testTranscript = "This is a test transcript to verify backend integration is working properly with the correct user session token.";
+  console.log('🧪 Sending test transcript:', testTranscript);
+  
+  await sendTranscriptToBackend(testTranscript);
+};
+
+/**
+ * Test function to set a user session token manually
+ * Can be called from browser console: setTestUserSessionToken('your_token_here')
+ */
+window.setTestUserSessionToken = async function(sessionToken) {
+  console.log('🧪 Setting test user session token...');
+  
+  if (!sessionToken) {
+    console.error('❌ Please provide a session token');
+    console.log('💡 Usage: setTestUserSessionToken("eyJhbGciOiJIUzI1NiIsImtpZCI6...")');
+    return;
+  }
+  
+  // Validate token format
+  if (sessionToken.includes('"role":"anon"')) {
+    console.error('❌ WRONG TOKEN: This appears to be an anonymous key!');
+    console.error('❌ You need the user session token, not the anon key');
+    console.log('💡 Get the correct token with: getAndStoreSupabaseSessionToken()');
+    return;
+  }
+  
+  const stored = await storeUserSessionToken(sessionToken);
+  
+  if (stored) {
+    console.log('✅ Test user session token set successfully');
+    console.log('🧪 Now test voice capture: testVoiceTranscriptSending()');
+  }
+};
+
+/**
+ * Test function to check what token is currently being used
+ */
+window.checkCurrentTokenType = async function() {
+  console.log('🔍 Checking current token type...');
+  
+  try {
+    const userToken = await getUserSessionToken();
+    const regularToken = await getAuthToken();
+    
+    console.log('🔍 User session token:', userToken ? userToken.substring(0, 20) + '...' : 'NOT SET');
+    console.log('🔍 Regular auth token:', regularToken ? regularToken.substring(0, 20) + '...' : 'NOT SET');
+    
+    if (userToken && userToken !== regularToken) {
+      console.log('✅ GOOD: Using separate user session token for voice API');
+      
+      // Check if it's an anon key
+      if (userToken.includes('"role":"anon"')) {
+        console.log('❌ WARNING: User session token appears to be an anon key!');
+      } else {
+        console.log('✅ EXCELLENT: User session token appears to be correct');
+      }
+    } else {
+      console.log('❌ WARNING: Voice API will use regular auth token (likely anon key)');
+    }
+    
+  } catch (error) {
+    console.error('❌ Error checking tokens:', error);
+  }
+};
+
+/**
+ * Test function to check current voice capture state
+ */
+window.checkVoiceCaptureState = function() {
+  console.log('🔍 Voice Capture State Check:');
+  console.log('- isVoiceCapturing:', isVoiceCapturing);
+  console.log('- currentSessionId:', currentSessionId);
+  console.log('- voiceRecognition:', voiceRecognition);
+  console.log('- voiceTranscriptBuffer:', voiceTranscriptBuffer);
+  console.log('- bufferStartTime:', bufferStartTime);
+  console.log('- chunkTimer:', chunkTimer);
+  console.log('- currentUser:', currentUser);
+};
+
+/**
+ * Restart voice recognition with error handling
+ */
+function restartVoiceRecognition() {
+  try {
+    if (voiceRecognition) {
+      voiceRecognition.stop();
+    }
+    setTimeout(() => {
+      if (isVoiceCapturing && voiceRecognition) {
+        voiceRecognition.start();
+      }
+    }, 1000);
+  } catch (error) {
+    console.error('Error in restartVoiceRecognition:', error);
+  }
+}
+
+/**
+ * Start voice capture for the current session with enhanced error handling
+ * @param {string} sessionId - The session ID to associate with voice capture
+ */
+function startVoiceCapture(sessionId) {
+  console.log('Attempting to start voice capture for session:', sessionId);
+  
+  // Validate prerequisites
+  if (!currentUser || currentUser.role !== 'professor') {
+    console.log('Voice capture only available for professors');
+    return false;
+  }
+  
+  if (!sessionId) {
+    console.error('Cannot start voice capture: no session ID provided');
+    showToast('Cannot start voice capture: no active session', 'error');
+    return false;
+  }
+  
+  if (isVoiceCapturing) {
+    console.log('Voice capture already active for session:', currentSessionId);
+    return true;
+  }
+  
+  // Initialize voice recognition if not already done
+  if (!voiceRecognition && !initializeVoiceCapture()) {
+    showToast('Voice capture not available in this browser', 'error');
+    return false;
+  }
+  
+  try {
+    // Set session state
+    currentSessionId = sessionId;
+    isVoiceCapturing = true;
+    consecutiveSilenceCount = 0;
+    resetTranscriptBuffer();
+    
+    // Request microphone permission and start recognition
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(() => {
+        console.log('Microphone permission granted');
+        voiceRecognition.start();
+        console.log('Voice capture started for session:', sessionId);
+        showVoiceRecordingIndicator(true);
+        showToast('Voice capture started - speaking will be transcribed', 'success');
+      })
+      .catch((error) => {
+        console.error('Microphone permission denied:', error);
+        isVoiceCapturing = false;
+        currentSessionId = null;
+        showToast('Microphone access required for voice capture', 'error');
+      });
+      
+    return true;
+  } catch (error) {
+    console.error('Error starting voice capture:', error);
+    isVoiceCapturing = false;
+    currentSessionId = null;
+    showToast('Failed to start voice capture: ' + error.message, 'error');
+    return false;
+  }
+}
+
+/**
+ * Stop voice capture with proper cleanup
+ */
+function stopVoiceCapture() {
+  console.log('Stopping voice capture');
+  
+  if (!isVoiceCapturing) {
+    return;
+  }
+  
+  // Process any remaining transcript in buffer
+  if (voiceTranscriptBuffer.trim()) {
+    console.log('Processing final transcript chunk before stopping');
+    processTranscriptChunk();
+  }
+  
+  // Stop recognition
+  isVoiceCapturing = false;
+  currentSessionId = null;
+  consecutiveSilenceCount = 0;
+  resetTranscriptBuffer();
+  
+  if (voiceRecognition) {
+    try {
+      voiceRecognition.stop();
+    } catch (error) {
+      console.error('Error stopping voice recognition:', error);
+    }
+  }
+  
+  // Update UI
+  showVoiceRecordingIndicator(false);
+  updateVoiceRecognitionUI('');
+  
+  console.log('Voice capture stopped');
+  showToast('Voice capture stopped', 'info');
+}
+
+/**
+ * Show/hide voice recording indicator in UI
+ * @param {boolean} show - Whether to show the indicator
+ */
+function showVoiceRecordingIndicator(show) {
+  // Remove existing indicator
+  const existingIndicator = document.getElementById('lynkk-voice-indicator');
+  if (existingIndicator) {
+    existingIndicator.remove();
+  }
+  
+  if (!show) {
+    return;
+  }
+  
+  // Create voice recording indicator
+  const indicator = document.createElement('div');
+  indicator.id = 'lynkk-voice-indicator';
+  indicator.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+    animation: lynkk-pulse 2s infinite;
+  `;
+  
+  indicator.innerHTML = `
+    <div style="width: 8px; height: 8px; background: white; border-radius: 50%; animation: lynkk-blink 1s infinite;"></div>
+    Recording Voice
+  `;
+  
+  // Add CSS animations if not already present
+  if (!document.querySelector('#lynkk-voice-animations')) {
+    const style = document.createElement('style');
+    style.id = 'lynkk-voice-animations';
+    style.textContent = `
+      @keyframes lynkk-pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+      }
+      @keyframes lynkk-blink {
+        0%, 50% { opacity: 1; }
+        51%, 100% { opacity: 0.3; }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  document.body.appendChild(indicator);
+  
+  // Add click handler to stop recording
+  indicator.addEventListener('click', () => {
+    if (confirm('Stop voice capture for this session?')) {
+      stopVoiceCapture();
+    }
+  });
+  
+  indicator.style.cursor = 'pointer';
+  indicator.title = 'Click to stop voice capture';
+}
+
+/**
+ * Update voice recognition UI with current status
+ * @param {string} status - Current recognition status
+ */
+function updateVoiceRecognitionUI(status) {
+  const indicator = document.getElementById('lynkk-voice-indicator');
+  if (indicator && status) {
+    const statusEl = indicator.querySelector('.status-text');
+    if (statusEl) {
+      statusEl.textContent = status;
+    } else {
+      // Add status text if not present
+      indicator.innerHTML += `<div class="status-text" style="font-size: 10px; opacity: 0.9;">${status}</div>`;
+    }
+  }
+}
+
+/**
+ * Send transcript chunk to backend for processing and embedding generation
+ * @param {string} transcript - The transcribed text chunk from speech
+ */
+async function sendTranscriptToBackend(transcript) {
+  console.log('🎤 sendTranscriptToBackend called with transcript:', transcript.substring(0, 100) + '...');
+  
+  if (!transcript || transcript.length < 5) {
+    console.log('❌ Skipping short transcript:', transcript);
+    return; // Ignore very short utterances
+  }
+  
+  console.log('✅ Sending transcript to backend (length:', transcript.length, ')');
+  
+  try {
+    // Use user session token instead of regular auth token for voice API
+    const authToken = await getUserSessionToken();
+    if (!authToken) {
+      console.error('❌ No user session token available for voice transcript');
+      return;
+    }
+    
+    console.log('✅ User session token retrieved:', authToken.substring(0, 10) + '...');
+    
+    // Validate token type for debugging
+    try {
+      const tokenPayload = JSON.parse(atob(authToken.split('.')[1]));
+      const tokenRole = tokenPayload.role;
+      const tokenIss = tokenPayload.iss;
+      
+      console.log('🔍 Token validation:');
+      console.log('  - Role:', tokenRole);
+      console.log('  - Issuer:', tokenIss);
+      console.log('  - Subject (User ID):', tokenPayload.sub);
+      
+      if (tokenRole === 'anon') {
+        console.error('❌ CRITICAL: Using ANONYMOUS token for voice API!');
+        console.error('❌ This token will NOT save to database!');
+        console.error('💡 Fix: Call getAndStoreSupabaseSessionToken() first');
+        console.error('💡 Or use: setTestUserSessionToken("correct_user_token")');
+      } else if (tokenRole === 'authenticated') {
+        console.log('✅ EXCELLENT: Using USER SESSION token - will save to database!');
+      } else {
+        console.warn('⚠️ Unknown token role:', tokenRole);
+      }
+    } catch (e) {
+      console.warn('⚠️ Could not decode token for validation');
+    }
+    
+    if (!currentSessionId) {
+      console.error('❌ No current session ID available');
+      return;
+    }
+    
+    console.log('✅ Current session ID:', currentSessionId);
+    
+    const payload = {
+      transcript: transcript,
+      timestamp: new Date().toISOString(),
+      professorId: currentUser?.id,
+      sessionId: currentSessionId,
+      chunkIndex: Date.now(), // Simple chunk identifier
+      processingType: 'voice_chunk' // Helps backend identify this as voice data
+    };
+    
+    console.log('📤 Sending payload to backend:', {
+      ...payload,
+      transcript: payload.transcript.substring(0, 50) + '...'
+    });
+    
+    const apiUrl = `http://localhost:3000/api/sessions/${currentSessionId}/voice-transcript`;
+    console.log('🌐 API URL:', apiUrl);
+    
+    // Send transcript to backend for processing and embedding generation
+    chrome.runtime.sendMessage({
+      type: 'API_REQUEST',
+      url: apiUrl,
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: payload
+    }, (response) => {
+      console.log('📥 Backend response received:', response);
+      
+      if (response && response.ok) {
+        console.log('✅ Voice transcript processed successfully:', {
+          chunkLength: transcript.length,
+          processingTime: response.data?.processingTime,
+          embeddingGenerated: response.data?.embeddingGenerated
+        });
+        
+        // Optional: Show success indicator (but don't spam user)
+        if (response.data?.embeddingGenerated) {
+          console.log('🧠 Embedding generated for transcript chunk');
+        }
+      } else {
+        console.error('❌ Error processing voice transcript. Status:', response?.status);
+        console.error('❌ Error details:', response?.data);
+        console.error('❌ Error message:', response?.error);
+        console.error('❌ Full response object:', JSON.stringify(response, null, 2));
+        
+        // Show detailed error information
+        if (response?.data) {
+          console.error('🔍 Backend error details:', response.data);
+          if (response.data.message) {
+            console.error('🔍 Backend error message:', response.data.message);
+          }
+          if (response.data.errors) {
+            console.error('🔍 Backend validation errors:', response.data.errors);
+          }
+        }
+        
+        // For important errors, show user feedback
+        if (response?.error?.includes('authentication') || response?.error?.includes('session')) {
+          showToast('Voice processing error: ' + response.error, 'error');
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error sending transcript to backend:', error);
+  }
 }
 
 // ==================== CHAT UI FUNCTIONS ====================
@@ -1846,6 +2593,12 @@ function endSession(sessionId) {
     return;
   }
   
+  // Stop voice capture if this is the current session
+  if (isVoiceCapturing && currentSessionId === sessionId) {
+    console.log('Stopping voice capture for ending session:', sessionId);
+    stopVoiceCapture();
+  }
+  
   const authToken = result.authState.token || '';
   
   // Create a loading indicator on the button
@@ -2318,6 +3071,17 @@ async function createSession() {
       
       console.log('Session created successfully:', response.data);
       
+      // Start voice capture for the new session if user is professor
+      if (currentUser && currentUser.role === 'professor' && response.data) {
+        const sessionId = response.data.id || response.data.data?.id;
+        if (sessionId) {
+          console.log('Starting voice capture for new session:', sessionId);
+          setTimeout(() => {
+            startVoiceCapture(sessionId);
+          }, 1000); // Small delay to ensure session is fully set up
+        }
+      }
+      
       // Show success dialog with join code
       showSessionSuccessDialog(response.data);
       
@@ -2788,6 +3552,14 @@ async function openSession(sessionId) {
         activeTab: 'ai' // Set AI tab as default active tab
       }, () => {
         console.log('Session stored in local storage');
+        
+        // Start voice capture if user is professor
+        if (currentUser && currentUser.role === 'professor') {
+          console.log('Starting voice capture for session:', sessionId);
+          setTimeout(() => {
+            startVoiceCapture(sessionId);
+          }, 1000); // Small delay to ensure session is fully set up
+        }
         
         // Render session tabs
         renderSessionTabs();
@@ -4756,6 +5528,21 @@ function renderAnonymousComponents() {
       if (classQuestionsTab) {
         classQuestionsTab.click();
       }
+    }
+  });
+
+  // Cleanup handlers for voice capture
+  window.addEventListener('beforeunload', () => {
+    console.log('Page unloading - stopping voice capture');
+    if (isVoiceCapturing) {
+      stopVoiceCapture();
+    }
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && isVoiceCapturing) {
+      console.log('Page hidden - stopping voice capture');
+      stopVoiceCapture();
     }
   });
 }

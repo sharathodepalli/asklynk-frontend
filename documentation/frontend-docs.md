@@ -1,8 +1,26 @@
 # AskLynk Chrome Extension Frontend Documentation
 
-## Project Overview
+## Project ### AI Assistant Integration
 
-AskLynk is a powerful Chrome Extension designed to enhance classroom interactions between professors and students. It enables anonymous question submission, real-time classroom discussions, AI-powered assistance, and polling functionality.
+The AI assistant provides smart educational support:
+
+- Context-aware responses based on session content
+- Message history preservation
+- Code syntax highlighting
+- Markdown rendering
+- Session-specific knowledge
+
+### 5. Voice Capture & Transcript Processing
+
+The voice capture system automatically records and processes live lecture content:
+
+- **Real-time Speech Recognition**: Uses Web Speech Recognition API for live transcription
+- **Chunked Processing**: Processes voice in 7-second intervals for optimal performance
+- **Background Embeddings**: Converts transcript chunks to vector embeddings for semantic search
+- **Database Storage**: Stores transcripts with session context for future retrieval
+- **Authenticated Processing**: Uses Supabase user session tokens for secure data handling
+- **Cross-platform Support**: Works on Google Meet and other supported classroom platforms
+  AskLynk is a powerful Chrome Extension designed to enhance classroom interactions between professors and students. It enables anonymous question submission, real-time classroom discussions, AI-powered assistance, and polling functionality.
 
 ## Tech Stack
 
@@ -93,6 +111,46 @@ asklynk/
 ```
 
 ## Key Functions Documentation
+
+### Voice Capture System
+
+```javascript
+// Initialize voice capture functionality
+function initializeVoiceCapture() {
+  // Sets up Web Speech Recognition API with continuous listening
+  // Processes speech in 7-second chunks for optimal performance
+}
+
+// Start recording voice for transcription
+function startRecording() {
+  // Begins continuous speech recognition
+  // Automatically chunks and processes transcript data
+}
+
+// Stop voice recording
+function stopRecording() {
+  // Stops speech recognition and processing
+}
+
+// Send transcript chunk to backend for embedding generation
+async function sendTranscriptToBackend(transcriptChunk) {
+  // Validates user authentication token
+  // Sends transcript to backend API for vector embedding processing
+  // Stores transcript data in database with session context
+}
+
+// Get authenticated Supabase user session token
+async function getUserSessionToken() {
+  // Retrieves current user's Supabase session token
+  // Validates token permissions for database operations
+}
+
+// Store user session token for voice processing
+function storeUserSessionToken(token) {
+  // Stores authenticated token in Chrome storage
+  // Used for secure voice transcript database operations
+}
+```
 
 ### Authentication Flow
 
@@ -241,13 +299,13 @@ chrome.runtime.sendMessage(
 
 ### Background Script API Handling
 
-The background script handles API requests:
+The background script handles API requests and voice processing:
 
 ```javascript
 // In background.js
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "API_REQUEST") {
-    // Process API request
+    // Process API request including voice transcript submissions
     fetch(message.url, {
       method: message.method,
       headers: message.headers,
@@ -258,6 +316,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((error) => sendResponse({ ok: false, error: error.message }));
 
     return true; // Keep message channel open for async response
+  }
+
+  // Handle user session token management for voice processing
+  if (message.type === "GET_USER_SESSION_TOKEN") {
+    chrome.storage.local.get(["userSessionToken"], (result) => {
+      sendResponse({ token: result.userSessionToken });
+    });
+    return true;
+  }
+
+  if (message.type === "SET_USER_SESSION_TOKEN") {
+    chrome.storage.local.set({ userSessionToken: message.token }, () => {
+      sendResponse({ success: true });
+    });
+    return true;
   }
 });
 ```
@@ -283,6 +356,8 @@ Key stored objects include:
 - `authState`: Current user authentication state
 - `activeSession`: Currently active session data
 - `anonymousIdentity`: User's anonymous identity in the current session
+- `userSessionToken`: Authenticated Supabase session token for voice processing
+- `voiceCaptureSettings`: User preferences for voice capture functionality
 
 ## API Integration
 
@@ -300,6 +375,32 @@ async function getSessionById(sessionId, authToken) {
         headers: {
           Authorization: `Bearer ${authToken}`,
           "Content-Type": "application/json",
+        },
+      },
+      (response) => {
+        resolve(response);
+      }
+    );
+  });
+}
+
+// Voice transcript API integration
+async function submitVoiceTranscript(transcriptData, userToken) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      {
+        type: "API_REQUEST",
+        url: "http://localhost:3000/api/voice-transcript",
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${userToken}`,
+          "Content-Type": "application/json",
+        },
+        body: {
+          transcript: transcriptData.text,
+          session_id: transcriptData.sessionId,
+          timestamp: transcriptData.timestamp,
+          chunk_id: transcriptData.chunkId,
         },
       },
       (response) => {
@@ -328,6 +429,39 @@ Required environment variables:
 VITE_API_BASE_URL=http://localhost:3000
 VITE_AUTH_PAGE_URL=http://localhost:5173
 VITE_GEMINI_API_KEY=your_gemini_api_key_here
+VITE_SUPABASE_URL=your_supabase_project_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+### Voice Capture Setup
+
+The voice capture functionality requires:
+
+1. **Microphone Permissions**: Browser will request microphone access on first use
+2. **HTTPS Context**: Voice recognition requires secure context (HTTPS or localhost)
+3. **Supabase Authentication**: User must be logged in for transcript storage
+4. **Backend API**: Voice transcript endpoint must be running at `localhost:3000`
+
+### Manifest V3 Configuration
+
+The extension uses Manifest V3 with these key permissions:
+
+```json
+{
+  "manifest_version": 3,
+  "permissions": ["storage", "activeTab", "tabs"],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "http://localhost:5173/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*", "https://*.instructure.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
 ```
 
 ### Adding New Features
@@ -374,28 +508,69 @@ If API requests fail:
 - Check if authentication tokens are being properly passed
 - Ensure background script is handling API_REQUEST messages
 
+### Voice Capture Issues
+
+If voice capture doesn't work:
+
+- **Microphone Access**: Check if browser has microphone permissions
+- **HTTPS Required**: Voice recognition only works on HTTPS or localhost
+- **Browser Support**: Ensure browser supports Web Speech Recognition API
+- **Authentication**: Verify user is logged in with valid Supabase session
+- **Token Validation**: Check console for "Role: authenticated" message
+- **Backend Connection**: Ensure voice transcript API endpoint is running
+
+Common voice capture error messages:
+
+```javascript
+// Check console for these debug messages:
+"🎤 Voice capture initialized successfully";
+"🔴 CRITICAL: No user session token found";
+"✅ EXCELLENT: Using USER SESSION token - will save to database!";
+"⚠️ WARNING: Using ANONYMOUS key - transcripts won't be saved!";
+```
+
+### Database Storage Issues
+
+If voice transcripts aren't saving to database:
+
+- Verify user session token is being used (not anonymous key)
+- Check backend logs for database connection errors
+- Ensure voice_transcripts table exists with proper schema
+- Verify user has authenticated role permissions in Supabase
+
 ## Future Development Roadmap
 
 1. **Performance Optimization**
 
    - Bundle and minimize extension code
    - Implement more efficient rendering
+   - Optimize voice processing for longer lectures
 
-2. **UI Enhancements**
+2. **Voice & AI Enhancements**
+
+   - Add speaker identification for multi-person lectures
+   - Implement real-time transcript display
+   - Add voice command controls for extension features
+   - Integrate transcript search and semantic query functionality
+
+3. **UI Enhancements**
 
    - Support dark mode
    - Add accessibility features
    - Implement responsive design for mobile views
+   - Add voice capture status indicators
 
-3. **Feature Expansion**
+4. **Feature Expansion**
 
    - Add support for file attachments in questions
    - Implement real-time collaboration tools
    - Add more analytics for professors
+   - Support offline voice processing and sync
 
-4. **Security Enhancements**
+5. **Security Enhancements**
    - Implement stronger token management
    - Add end-to-end encryption for sensitive data
+   - Secure voice data transmission and storage
 
 ## Contact & Support
 
@@ -407,4 +582,12 @@ For questions or issues with the frontend implementation, please contact the dev
 
 ---
 
-Last updated: April 27, 2025
+Last updated: August 3, 2025
+
+**Recent Updates:**
+
+- Added comprehensive voice capture and transcript processing functionality
+- Implemented Manifest V3 compatibility with service worker background script
+- Enhanced authentication system with Supabase user session token management
+- Added real-time speech recognition with 7-second chunked processing
+- Integrated voice-to-embeddings pipeline for semantic lecture search
