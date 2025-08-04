@@ -916,11 +916,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const originalTab = tabs[0];
         Logger.log('Current tab info:', originalTab.id, originalTab.url);
         
+        // Ensure we have a valid URL, fallback to empty string if undefined/null
+        const returnUrl = originalTab.url || '';
+        Logger.log('Return URL for auth:', returnUrl);
+        
         // Store the original tab information
         chrome.storage.local.set({
           originalTabInfo: {
             tabId: originalTab.id,
-            url: originalTab.url
+            url: returnUrl
           }
         }, () => {
           if (chrome.runtime.lastError) {
@@ -929,8 +933,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return;
           }
           
-          // Construct auth URL
-          const authUrl = `${AUTH_PAGE_URL}/?extension=true&returnUrl=${encodeURIComponent(originalTab.url)}`;
+          // Construct auth URL with proper encoding
+          const authUrl = `${AUTH_PAGE_URL}/?extension=true&returnUrl=${encodeURIComponent(returnUrl)}`;
           Logger.log('Opening auth page URL:', authUrl);
           
           // Open the authentication page
@@ -1264,16 +1268,33 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         // Return to original tab if information is available
         chrome.storage.local.get(['originalTabInfo'], (result) => {
           if (result.originalTabInfo) {
-            chrome.tabs.update(result.originalTabInfo.tabId, {
-              active: true,
-              url: result.originalTabInfo.url
-            }, (updatedTab) => {
-              // Clean up stored tab info
-              chrome.storage.local.remove(['originalTabInfo']);
+            // Only navigate back if we have a valid URL
+            if (result.originalTabInfo.url && result.originalTabInfo.url.trim() !== '') {
+              chrome.tabs.update(result.originalTabInfo.tabId, {
+                active: true,
+                url: result.originalTabInfo.url
+              }, (updatedTab) => {
+                // Clean up stored tab info
+                chrome.storage.local.remove(['originalTabInfo']);
 
-              // Close login tab
-              chrome.tabs.remove(sender.tab.id);
-            });
+                // Close login tab
+                chrome.tabs.remove(sender.tab.id);
+              });
+            } else {
+              // Just activate the original tab without changing URL
+              chrome.tabs.update(result.originalTabInfo.tabId, {
+                active: true
+              }, (updatedTab) => {
+                // Clean up stored tab info
+                chrome.storage.local.remove(['originalTabInfo']);
+
+                // Close login tab
+                chrome.tabs.remove(sender.tab.id);
+              });
+            }
+          } else {
+            // Just close the login tab if no original tab info
+            chrome.tabs.remove(sender.tab.id);
           }
         });
       });
