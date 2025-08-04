@@ -923,16 +923,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // Check if it's a valid web URL
           if (originalTab.url.startsWith('http://') || originalTab.url.startsWith('https://')) {
             returnUrl = originalTab.url;
-          } else if (originalTab.url.startsWith('chrome://') || originalTab.url.startsWith('chrome-extension://')) {
-            // For Chrome internal pages, use a generic fallback
-            returnUrl = 'chrome://newtab/';
           } else {
-            // For any other case, use new tab
-            returnUrl = 'chrome://newtab/';
+            // For Chrome internal pages or extension pages, use a special flag
+            // This tells the auth page to close instead of redirecting
+            returnUrl = 'CLOSE_WINDOW';
           }
         } else {
-          // No URL available, use new tab as fallback
-          returnUrl = 'chrome://newtab/';
+          // No URL available, use close window flag
+          returnUrl = 'CLOSE_WINDOW';
         }
         
         Logger.log('Processed return URL for auth:', returnUrl);
@@ -950,8 +948,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return;
           }
           
-          // Construct auth URL with the new format
-          const authUrl = `${AUTH_PAGE_URL}/auth?extension_auth=true&from_extension=true&redirect=${encodeURIComponent(returnUrl)}`;
+          // Construct auth URL with the simplified format (no redirect parameter)
+          const authUrl = `${AUTH_PAGE_URL}/auth?extension_auth=true&from_extension=true`;
           Logger.log('Opening auth page URL:', authUrl);
           
           // Open the authentication page
