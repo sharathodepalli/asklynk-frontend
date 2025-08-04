@@ -1,0 +1,40 @@
+{
+    "manifest_version": 3,
+    "name": "AskLynk - AI-Powered Classroom Assistant",
+    "version": "1.0.0",
+    "description": "AI-powered classroom assistant with anonymous questions, smart transcription, and context-aware help for online learning.",
+    "permissions": [
+      "storage",
+      "activeTab"
+    ],
+    "host_permissions": [
+      "https://asklynk-bkend-d5qpx8shx-sharath-chandra-s-projects.vercel.app/*",
+      "https://asklynk-58z1r8wvq-sharath-chandra-s-projects.vercel.app/*"
+    ],
+    "externally_connectable": {
+      "matches": [
+        "https://asklynk-58z1r8wvq-sharath-chandra-s-projects.vercel.app/*"
+      ]
+    },
+    "background": {
+      "service_worker": "background.js"
+    },
+    "action": {
+      "default_popup": "popup.html",
+      "default_icon": "icon/icon.png"
+    },
+    "content_scripts": [
+      {
+        "matches": ["https://meet.google.com/*", "https://*.instructure.com/*"],
+        "js": ["config.js", "content.js"]
+      }
+    ],
+    "icons": {
+      "16": "icon/icon16.png",
+      "48": "icon/icon48.png",
+      "128": "icon/icon128.png"
+    },
+    "content_security_policy": {
+      "extension_pages": "script-src 'self'; object-src 'self';"
+    }
+  }
