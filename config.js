@@ -32,7 +32,7 @@ const CONFIG = {
   },
   production: {
     API_BASE_URL: 'https://asklynk-bkend-d5qpx8shx-sharath-chandra-s-projects.vercel.app',
-    AUTH_PAGE_URL: 'https://asklynk.vercel.app',
+    AUTH_PAGE_URL: 'https://asklynk-gzn56f93d-sharath-chandra-s-projects.vercel.app',
     ENVIRONMENT: 'production',
     DEBUG_LOGGING: false
   }

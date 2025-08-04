@@ -950,8 +950,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return;
           }
           
-          // Construct auth URL with proper encoding
-          const authUrl = `${AUTH_PAGE_URL}/?extension=true&returnUrl=${encodeURIComponent(returnUrl)}`;
+          // Construct auth URL with the new format
+          const authUrl = `${AUTH_PAGE_URL}/auth?extension_auth=true&from_extension=true&redirect=${encodeURIComponent(returnUrl)}`;
           Logger.log('Opening auth page URL:', authUrl);
           
           // Open the authentication page
