@@ -37,8 +37,9 @@
     <div id="results"></div>
 
     <script>
-        // Your extension ID - update this!
-        const EXTENSION_ID = 'YOUR_EXTENSION_ID_HERE'; // Update this with actual extension ID
+        // ENHANCED DEBUG SCRIPT FOR ENVIRONMENT MISMATCH
+        // Auto-detect extension ID and environment issues
+        let EXTENSION_ID = 'dokfobplbpfdbnlfhhaemkebcjbjkmpp'; // Your actual extension ID
         
         function log(message, type = 'info') {
             const results = document.getElementById('results');
@@ -174,14 +175,18 @@
             
             // Check if we're on localhost (development) or production
             if (currentUrl.includes('localhost:5173')) {
-                log(`🔧 DEVELOPMENT environment detected`, 'info');
+                log(`🔧 DEVELOPMENT environment detected (Port 5173)`, 'info');
                 log(`💡 Extension should accept messages from: http://localhost:5173`, 'info');
+            } else if (currentUrl.includes('localhost:3001')) {
+                log(`🔧 DEVELOPMENT environment detected (Port 3001)`, 'info');
+                log(`💡 Extension should accept messages from: http://localhost:3001`, 'info');
             } else if (currentUrl.includes('asklynk-gzn56f93d')) {
                 log(`🚀 PRODUCTION environment detected`, 'info');
                 log(`💡 Extension should accept messages from: https://asklynk-gzn56f93d-sharath-chandra-s-projects.vercel.app`, 'info');
             } else {
                 log(`❓ UNKNOWN environment - URL: ${currentUrl}`, 'error');
                 log(`💡 Extension may not accept messages from this domain`, 'error');
+                log(`🔧 Supported domains: localhost:5173, localhost:3001, asklynk-gzn56f93d`, 'info');
             }
         }
 
