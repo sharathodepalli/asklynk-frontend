@@ -876,6 +876,13 @@ console.log('📋 Extension ID:', chrome.runtime.id);
 console.log('🌐 Auth Page URL:', AUTH_PAGE_URL);
 console.log('🔧 Environment:', IS_DEVELOPMENT ? 'Development' : 'Production');
 
+// Global debugging: Listen for ALL external messages (even unauthorized ones)
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  console.log('🟡 ANY EXTERNAL MESSAGE RECEIVED (Global Debug)');
+  console.log('🟡 From:', sender.url);
+  console.log('🟡 Message:', message);
+});
+
 // Global state for authentication
 let currentAuthState = {
   isLoggedIn: false,
@@ -902,7 +909,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Check authentication state
   if (message.type === 'CHECK_AUTH') {
+    console.log('🔍 CHECK_AUTH requested');
+    console.log('🔍 Current auth state:', {
+      isLoggedIn: currentAuthState.isLoggedIn,
+      hasUser: !!currentAuthState.user,
+      username: currentAuthState.user?.username,
+      hasToken: !!currentAuthState.token
+    });
+    
     sendResponse(currentAuthState);
+    return true;
+  }
+
+  // Test function to verify auth state persistence
+  if (message.type === 'TEST_AUTH_STORAGE') {
+    console.log('🧪 Testing auth storage...');
+    
+    chrome.storage.local.get(['authState'], (result) => {
+      console.log('🧪 Storage result:', result);
+      sendResponse({
+        currentState: currentAuthState,
+        storedState: result.authState,
+        matches: JSON.stringify(currentAuthState) === JSON.stringify(result.authState)
+      });
+    });
+    
     return true;
   }
 
@@ -1246,11 +1277,23 @@ if (message.type === 'API_REQUEST') {
 
 // Listen for external messages from auth page
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
-  Logger.log('📨 External message received from:', sender.url);
+  console.log('🔵 EXTERNAL MESSAGE RECEIVED!');
+  console.log('🔍 Sender URL:', sender.url);
+  console.log('🔍 Sender Tab ID:', sender.tab?.id);
+  console.log('� Message Type:', message.type);
+  console.log('🔍 Full Message:', message);
+  console.log('🔍 AUTH_PAGE_URL for comparison:', AUTH_PAGE_URL);
+  
+  Logger.log('�📨 External message received from:', sender.url);
   Logger.log('📨 Message content:', message);
   
+  // Check if sender URL starts with our auth page URL
+  const isAuthorizedDomain = sender.url && sender.url.startsWith(AUTH_PAGE_URL);
+  console.log('🔍 Is authorized domain?', isAuthorizedDomain);
+  
   // Only accept messages from your authentication page
-  if (sender.url && sender.url.startsWith(AUTH_PAGE_URL)) {
+  if (isAuthorizedDomain) {
+    console.log('✅ AUTHORIZED - Processing message');
     Logger.log('✅ Message from authorized domain');
 
     if (message.type === 'LOGIN_SUCCESS') {
@@ -1269,6 +1312,12 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
       
       Logger.log('✅ All required fields present');
       
+      console.log('🔄 BEFORE AUTH UPDATE - Current State:', {
+        isLoggedIn: currentAuthState.isLoggedIn,
+        hasUser: !!currentAuthState.user,
+        hasToken: !!currentAuthState.token
+      });
+      
       // Update auth state with user data from login page
       currentAuthState = {
         isLoggedIn: true,
@@ -1280,11 +1329,12 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         token: message.token
       };
       
-      Logger.log('🔄 Auth state updated:', {
+      console.log('🔄 AFTER AUTH UPDATE - New State:', {
         isLoggedIn: currentAuthState.isLoggedIn,
         username: currentAuthState.user.username,
         userId: currentAuthState.user.id,
-        hasToken: !!currentAuthState.token
+        hasToken: !!currentAuthState.token,
+        tokenStart: currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'NONE'
       });
 
       // Debug log the token
@@ -1293,12 +1343,30 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 
       // Store in Chrome storage
       chrome.storage.local.set({ authState: currentAuthState }, () => {
-        Logger.log('Auth state saved from external message');
+        if (chrome.runtime.lastError) {
+          Logger.error('❌ Error saving auth state:', chrome.runtime.lastError);
+          sendResponse({ success: false, error: 'Failed to save auth state' });
+          return;
+        }
+        
+        Logger.log('✅ Auth state saved successfully to storage');
+        console.log('✅ SAVED AUTH STATE:', {
+          isLoggedIn: currentAuthState.isLoggedIn,
+          username: currentAuthState.user.username,
+          userId: currentAuthState.user.id,
+          hasToken: !!currentAuthState.token
+        });
 
         // Broadcast to all extension components
         chrome.runtime.sendMessage({
           type: 'AUTH_CHANGED',
           authState: currentAuthState
+        }, (broadcastResponse) => {
+          if (chrome.runtime.lastError) {
+            Logger.log('Note: No extension components listening for AUTH_CHANGED (this is normal)');
+          } else {
+            Logger.log('✅ Auth state broadcasted to extension components');
+          }
         });
 
         // Return to original tab if information is available
@@ -1339,8 +1407,27 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
       });
 
       sendResponse({ success: true });
+      
+      // Verify storage after a short delay
+      setTimeout(() => {
+        chrome.storage.local.get(['authState'], (verifyResult) => {
+          console.log('🔍 VERIFICATION - Stored auth state:', verifyResult.authState);
+          if (verifyResult.authState && verifyResult.authState.isLoggedIn) {
+            console.log('✅ SUCCESS: Auth state is properly stored and persisted');
+          } else {
+            console.log('❌ ERROR: Auth state not properly stored');
+          }
+        });
+      }, 100);
+      
       return true;
     }
+  } else {
+    console.log('❌ UNAUTHORIZED MESSAGE');
+    console.log('❌ Sender URL:', sender.url);
+    console.log('❌ Expected URL to start with:', AUTH_PAGE_URL);
+    console.log('❌ Message will be ignored');
+    sendResponse({ success: false, error: 'Unauthorized domain' });
   }
 });
 
