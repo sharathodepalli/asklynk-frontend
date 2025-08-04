@@ -876,13 +876,6 @@ console.log('📋 Extension ID:', chrome.runtime.id);
 console.log('🌐 Auth Page URL:', AUTH_PAGE_URL);
 console.log('🔧 Environment:', IS_DEVELOPMENT ? 'Development' : 'Production');
 
-// Global debugging: Listen for ALL external messages (even unauthorized ones)
-chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
-  console.log('🟡 ANY EXTERNAL MESSAGE RECEIVED (Global Debug)');
-  console.log('🟡 From:', sender.url);
-  console.log('🟡 Message:', message);
-});
-
 // Global state for authentication
 let currentAuthState = {
   isLoggedIn: false,
