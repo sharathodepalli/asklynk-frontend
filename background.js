@@ -870,6 +870,12 @@
 // Import environment configuration
 importScripts('config.js');
 
+// Log extension information for debugging
+console.log('🚀 AskLynk Extension Background Script Loaded');
+console.log('📋 Extension ID:', chrome.runtime.id);
+console.log('🌐 Auth Page URL:', AUTH_PAGE_URL);
+console.log('🔧 Environment:', IS_DEVELOPMENT ? 'Development' : 'Production');
+
 // Global state for authentication
 let currentAuthState = {
   isLoggedIn: false,
@@ -1240,17 +1246,29 @@ if (message.type === 'API_REQUEST') {
 
 // Listen for external messages from auth page
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  Logger.log('📨 External message received from:', sender.url);
+  Logger.log('📨 Message content:', message);
+  
   // Only accept messages from your authentication page
   if (sender.url && sender.url.startsWith(AUTH_PAGE_URL)) {
-    Logger.log('Received external message:', message);
+    Logger.log('✅ Message from authorized domain');
 
     if (message.type === 'LOGIN_SUCCESS') {
+      Logger.log('🔐 Processing LOGIN_SUCCESS message');
+      
       // Validate required fields
       if (!message.token || !message.userId || !message.username) {
-        Logger.error('Missing required login data:', message);
+        Logger.error('❌ Missing required login data:', {
+          hasToken: !!message.token,
+          hasUserId: !!message.userId,
+          hasUsername: !!message.username
+        });
         sendResponse({ success: false, error: 'Invalid login data' });
         return true;
       }
+      
+      Logger.log('✅ All required fields present');
+      
       // Update auth state with user data from login page
       currentAuthState = {
         isLoggedIn: true,
@@ -1261,10 +1279,13 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         },
         token: message.token
       };
-      Logger.log('Updated auth state:', JSON.stringify({
-        ...currentAuthState,
-        token: currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY'
-      }));
+      
+      Logger.log('🔄 Auth state updated:', {
+        isLoggedIn: currentAuthState.isLoggedIn,
+        username: currentAuthState.user.username,
+        userId: currentAuthState.user.id,
+        hasToken: !!currentAuthState.token
+      });
 
       // Debug log the token
       Logger.log('Token received from login page (first 10 chars):', 
