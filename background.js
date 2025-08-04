@@ -10,16 +10,16 @@
 // chrome.storage.local.get(['authState'], (result) => {
 //   if (result.authState) {
 //       currentAuthState = result.authState;
-//       console.log('Restored auth state:', currentAuthState);
+//       Logger.log('Restored auth state:', currentAuthState);
 //       // Log token for debugging
-//       console.log('Restored token (first 10 chars):', 
+//       Logger.log('Restored token (first 10 chars):', 
 //         currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY');
 //   }
 // });
 
 // // Listen for messages from popup and content scripts
 // chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-//   console.log('Background received message:', message);
+//   Logger.log('Background received message:', message);
 
 //   if (message.type === 'CHECK_AUTH') {
 //       // Return current auth state
@@ -60,12 +60,12 @@
 //       };
       
 //       // Debug log the token
-//       console.log('Token being stored (first 10 chars):', 
+//       Logger.log('Token being stored (first 10 chars):', 
 //         currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY');
 
 //       // Store in Chrome storage
 //       chrome.storage.local.set({ authState: currentAuthState }, () => {
-//           console.log('Auth state saved:', JSON.stringify({
+//           Logger.log('Auth state saved:', JSON.stringify({
 //               ...currentAuthState,
 //               token: currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY'
 //           }));
@@ -83,16 +83,16 @@
 
 //   // Handle refresh token requests
 //         if (message.type === 'REFRESH_TOKEN') {
-//       console.log('Attempting to refresh token...');
+//       Logger.log('Attempting to refresh token...');
       
 //       if (currentAuthState.isLoggedIn && currentAuthState.token) {
-//         console.log('Returning existing token');
+//         Logger.log('Returning existing token');
 //         sendResponse({ success: true, token: currentAuthState.token });
 //         return true;
 //       }
       
 //       if (currentAuthState.isLoggedIn) {
-//         console.log('No token available, but user is logged in. Attempting server refresh...');
+//         Logger.log('No token available, but user is logged in. Attempting server refresh...');
         
 //         fetch('http://localhost:3000/api/auth/refresh', {
 //           method: 'POST',
@@ -121,7 +121,7 @@
 //           };
           
 //           chrome.storage.local.set({ authState: currentAuthState }, () => {
-//             console.log('Auth state updated with refreshed token');
+//             Logger.log('Auth state updated with refreshed token');
 //             chrome.runtime.sendMessage({
 //               type: 'AUTH_CHANGED',
 //               authState: currentAuthState
@@ -130,14 +130,14 @@
 //           });
 //         })
 //         .catch(error => {
-//           console.error('Token refresh failed:', error);
+//           Logger.error('Token refresh failed:', error);
 //           sendResponse({ success: false, error: error.message });
 //         });
         
 //         return true; // Keep the message channel open for async response
 //       }
       
-//       console.error('Cannot refresh token - not logged in');
+//       Logger.error('Cannot refresh token - not logged in');
 //       sendResponse({ success: false, error: 'Not logged in' });
 //       return true;
 //     }
@@ -152,7 +152,7 @@
 
 //       // Clear from storage
 //       chrome.storage.local.remove(['authState'], () => {
-//           console.log('Auth state cleared');
+//           Logger.log('Auth state cleared');
 
 //           // Broadcast to all extension components
 //           chrome.runtime.sendMessage({
@@ -166,17 +166,17 @@
 //   }
 
 //   if (message.type === 'API_REQUEST') {
-//       console.log('Background script handling API request:', message);
+//       Logger.log('Background script handling API request:', message);
 
 //       // Extract request details
 //       const { url, method, headers, body } = message;
       
 //       // Debug log the authorization header if present
 //       if (headers && headers.Authorization) {
-//           console.log('Authorization header (first 20 chars):', 
+//           Logger.log('Authorization header (first 20 chars):', 
 //             headers.Authorization.substring(0, 20) + '...');
 //       } else {
-//           console.log('No Authorization header present in request');
+//           Logger.log('No Authorization header present in request');
 //       }
 
 //       // Make the actual fetch request from background script
@@ -186,7 +186,7 @@
 //           body: body ? JSON.stringify(body) : undefined
 //       })
 //           .then(async (response) => {
-//               console.log(`API Response status: ${response.status} ${response.statusText}`);
+//               Logger.log(`API Response status: ${response.status} ${response.statusText}`);
               
 //               // First get the raw text
 //               const responseText = await response.text();
@@ -197,7 +197,7 @@
 //                   data = JSON.parse(responseText);
 //               } catch (e) {
 //                   // If not valid JSON, use the raw text
-//                   console.error('Invalid JSON response:', responseText.substring(0, 100));
+//                   Logger.error('Invalid JSON response:', responseText.substring(0, 100));
 //                   return sendResponse({
 //                       ok: false,
 //                       status: response.status,
@@ -214,7 +214,7 @@
 //               });
 //           })
 //           .catch((error) => {
-//               console.error('API request failed:', error);
+//               Logger.error('API request failed:', error);
 //               sendResponse({
 //                   ok: false,
 //                   error: error.message
@@ -229,12 +229,12 @@
 // chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
 //   // Only accept messages from your authentication page
 //   if (sender.url && sender.url.startsWith('http://localhost:5173')) {
-//       console.log('Received external message:', message);
+//       Logger.log('Received external message:', message);
 
 //       if (message.type === 'LOGIN_SUCCESS') {
 //         // Validate required fields
 //         if (!message.token || !message.userId || !message.username) {
-//           console.error('Missing required login data:', message);
+//           Logger.error('Missing required login data:', message);
 //           sendResponse({ success: false, error: 'Invalid login data' });
 //           return true;
 //         }
@@ -248,15 +248,15 @@
 //             },
 //             token: message.token
 //           };
-//           console.log('Updated auth statesafsdfdsafdsfa:', currentAuthState);
+//           Logger.log('Updated auth statesafsdfdsafdsfa:', currentAuthState);
 
 //           // Debug log the token
-//           console.log('Token received from login page (first 10 chars):', 
+//           Logger.log('Token received from login page (first 10 chars):', 
 //             message.token ? message.token.substring(0, 10) + '...' : 'EMPTY');
 
 //           // Store in Chrome storage
 //           chrome.storage.local.set({ authState: currentAuthState }, () => {
-//               console.log('Auth state saved from external message:', JSON.stringify({
+//               Logger.log('Auth state saved from external message:', JSON.stringify({
 //                   ...currentAuthState,
 //                   token: currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY'
 //               }));
@@ -302,7 +302,7 @@
 //           const token = url.searchParams.get('token');
 
 //           // Debug log the token
-//           console.log('Token from URL parameters (first 10 chars):', 
+//           Logger.log('Token from URL parameters (first 10 chars):', 
 //             token ? token.substring(0, 10) + '...' : 'EMPTY');
 
 //           if (username && role) {
@@ -319,7 +319,7 @@
 
 //               // Store in Chrome storage
 //               chrome.storage.local.set({ authState: currentAuthState }, () => {
-//                   console.log('Auth state saved from URL params:', JSON.stringify({
+//                   Logger.log('Auth state saved from URL params:', JSON.stringify({
 //                       ...currentAuthState,
 //                       token: currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY'
 //                   }));
@@ -350,7 +350,7 @@
 //               });
 //           }
 //       } catch (error) {
-//           console.error('Error processing auth URL:', error);
+//           Logger.error('Error processing auth URL:', error);
 //       }
 //   }
 // });
@@ -359,7 +359,7 @@
 // // In your background.js file
 // chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 //   if (message.type === 'API_REQUEST') {
-//     console.log('Processing API request:', message.url);
+//     Logger.log('Processing API request:', message.url);
     
 //     const options = {
 //       method: message.method || 'GET',
@@ -373,11 +373,11 @@
 //     fetch(message.url, options)
 //       .then(response => response.json())
 //       .then(data => {
-//         console.log('API response success:', data);
+//         Logger.log('API response success:', data);
 //         sendResponse({ ok: true, status: 200, data });
 //       })
 //       .catch(error => {
-//         console.error('API fetch error:', error);
+//         Logger.error('API fetch error:', error);
 //         sendResponse({ ok: false, error: 'Failed to fetch' });
 //       });
     
@@ -388,7 +388,7 @@
 // // // Handle API requests from content script
 // // chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // //   if (message.type === 'API_REQUEST') {
-// //     console.log('Processing API request:', message.url);
+// //     Logger.log('Processing API request:', message.url);
     
 // //     // Extract request details
 // //     const url = message.url;
@@ -413,11 +413,11 @@
 // //       return response.json();
 // //     })
 // //     .then(data => {
-// //       console.log('API response success:', url);
+// //       Logger.log('API response success:', url);
 // //       sendResponse({ ok: true, data: data });
 // //     })
 // //     .catch(error => {
-// //       console.error('API response error:', error);
+// //       Logger.error('API response error:', error);
 // //       sendResponse({ ok: false, error: error.message });
 // //     });
     
@@ -443,18 +443,18 @@
 //       .then(response => {
 //         if (!response.ok) {
 //           return response.text().then(text => {
-//             console.error('Error response body:', text);
+//             Logger.error('Error response body:', text);
 //             throw new Error(`API request failed with status ${response.status}: ${text}`);
 //           });
 //         }
 //         return response.json();
 //       })
 //       .then(data => {
-//         console.log('Gemini API success response:', data);
+//         Logger.log('Gemini API success response:', data);
 //         sendResponse({ success: true, data });
 //       })
 //       .catch(error => {
-//         console.error('Gemini API error:', error);
+//         Logger.error('Gemini API error:', error);
 //         sendResponse({ success: false, error: error.message });
 //       });
       
@@ -477,15 +477,15 @@
 // chrome.storage.local.get(['authState'], (result) => {
 //   if (result.authState) {
 //     currentAuthState = result.authState;
-//     console.log('Restored auth state:', currentAuthState);
-//     console.log('Restored token (first 10 chars):', 
+//     Logger.log('Restored auth state:', currentAuthState);
+//     Logger.log('Restored token (first 10 chars):', 
 //       currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY');
 //   }
 // });
 
 // // Listen for messages from popup and content scripts
 // chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-//   console.log('Background received message:', message.type);
+//   Logger.log('Background received message:', message.type);
 
 //   if (message.type === 'CHECK_AUTH') {
 //     // Return current auth state
@@ -525,12 +525,12 @@
 //       token: message.token
 //     };
     
-//     console.log('Token being stored (first 10 chars):', 
+//     Logger.log('Token being stored (first 10 chars):', 
 //       currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY');
 
 //     // Store in Chrome storage
 //     chrome.storage.local.set({ authState: currentAuthState }, () => {
-//       console.log('Auth state saved:', JSON.stringify({
+//       Logger.log('Auth state saved:', JSON.stringify({
 //         ...currentAuthState,
 //         token: currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY'
 //       }));
@@ -548,10 +548,10 @@
 
 //   // Handle refresh token requests - FIXED VERSION
 //   if (message.type === 'REFRESH_TOKEN') {
-//     console.log('Attempting to refresh token...');
+//     Logger.log('Attempting to refresh token...');
     
 //     if (currentAuthState.isLoggedIn && currentAuthState.token) {
-//       console.log('Returning existing token (first 10 chars):', 
+//       Logger.log('Returning existing token (first 10 chars):', 
 //         currentAuthState.token.substring(0, 10) + '...');
 //       sendResponse({ 
 //         success: true, 
@@ -561,7 +561,7 @@
 //     }
     
 //     if (currentAuthState.isLoggedIn) {
-//       console.log('No token available, but user is logged in. Attempting server refresh...');
+//       Logger.log('No token available, but user is logged in. Attempting server refresh...');
       
 //       fetch('http://localhost:3000/api/auth/refresh', {
 //         method: 'POST',
@@ -590,7 +590,7 @@
 //         };
         
 //         chrome.storage.local.set({ authState: currentAuthState }, () => {
-//           console.log('Auth state updated with refreshed token');
+//           Logger.log('Auth state updated with refreshed token');
 //           chrome.runtime.sendMessage({
 //             type: 'AUTH_CHANGED',
 //             authState: currentAuthState
@@ -599,14 +599,14 @@
 //         });
 //       })
 //       .catch(error => {
-//         console.error('Token refresh failed:', error);
+//         Logger.error('Token refresh failed:', error);
 //         sendResponse({ success: false, error: error.message });
 //       });
       
 //       return true; // Keep the message channel open for async response
 //     }
     
-//     console.error('Cannot refresh token - not logged in');
+//     Logger.error('Cannot refresh token - not logged in');
 //     sendResponse({ success: false, error: 'Not logged in' });
 //     return true;
 //   }
@@ -621,7 +621,7 @@
 
 //     // Clear from storage
 //     chrome.storage.local.remove(['authState'], () => {
-//       console.log('Auth state cleared');
+//       Logger.log('Auth state cleared');
 
 //       // Broadcast to all extension components
 //       chrome.runtime.sendMessage({
@@ -636,17 +636,17 @@
 
 //   // FIXED: Single consolidated API_REQUEST handler
 //   if (message.type === 'API_REQUEST') {
-//     console.log('Background script handling API request:', message.url);
+//     Logger.log('Background script handling API request:', message.url);
 
 //     // Extract request details
 //     const { url, method, headers, body } = message;
     
 //     // Debug log the authorization header if present
 //     if (headers && headers.Authorization) {
-//       console.log('Authorization header (first 20 chars):', 
+//       Logger.log('Authorization header (first 20 chars):', 
 //         headers.Authorization.substring(0, 20) + '...');
 //     } else {
-//       console.log('No Authorization header present in request');
+//       Logger.log('No Authorization header present in request');
 //     }
 
 //     // Make the actual fetch request from background script
@@ -656,7 +656,7 @@
 //       body: body ? JSON.stringify(body) : undefined
 //     })
 //     .then(async (response) => {
-//       console.log(`API Response status: ${response.status} ${response.statusText}`);
+//       Logger.log(`API Response status: ${response.status} ${response.statusText}`);
       
 //       // First get the raw text
 //       const responseText = await response.text();
@@ -667,7 +667,7 @@
 //         data = JSON.parse(responseText);
 //       } catch (e) {
 //         // If not valid JSON, use the raw text
-//         console.error('Invalid JSON response:', responseText.substring(0, 100));
+//         Logger.error('Invalid JSON response:', responseText.substring(0, 100));
 //         return sendResponse({
 //           ok: false,
 //           status: response.status,
@@ -684,7 +684,7 @@
 //       });
 //     })
 //     .catch((error) => {
-//       console.error('API request failed:', error);
+//       Logger.error('API request failed:', error);
 //       sendResponse({
 //         ok: false,
 //         error: error.message
@@ -710,18 +710,18 @@
 //     .then(response => {
 //       if (!response.ok) {
 //         return response.text().then(text => {
-//           console.error('Error response body:', text);
+//           Logger.error('Error response body:', text);
 //           throw new Error(`API request failed with status ${response.status}: ${text}`);
 //         });
 //       }
 //       return response.json();
 //     })
 //     .then(data => {
-//       console.log('Gemini API success response:', data);
+//       Logger.log('Gemini API success response:', data);
 //       sendResponse({ success: true, data });
 //     })
 //     .catch(error => {
-//       console.error('Gemini API error:', error);
+//       Logger.error('Gemini API error:', error);
 //       sendResponse({ success: false, error: error.message });
 //     });
     
@@ -736,12 +736,12 @@
 // chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
 //   // Only accept messages from your authentication page
 //   if (sender.url && sender.url.startsWith('http://localhost:5173')) {
-//     console.log('Received external message:', message);
+//     Logger.log('Received external message:', message);
 
 //     if (message.type === 'LOGIN_SUCCESS') {
 //       // Validate required fields
 //       if (!message.token || !message.userId || !message.username) {
-//         console.error('Missing required login data:', message);
+//         Logger.error('Missing required login data:', message);
 //         sendResponse({ success: false, error: 'Invalid login data' });
 //         return true;
 //       }
@@ -755,18 +755,18 @@
 //         },
 //         token: message.token
 //       };
-//       console.log('Updated auth state:', JSON.stringify({
+//       Logger.log('Updated auth state:', JSON.stringify({
 //         ...currentAuthState,
 //         token: currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY'
 //       }));
 
 //       // Debug log the token
-//       console.log('Token received from login page (first 10 chars):', 
+//       Logger.log('Token received from login page (first 10 chars):', 
 //         message.token ? message.token.substring(0, 10) + '...' : 'EMPTY');
 
 //       // Store in Chrome storage
 //       chrome.storage.local.set({ authState: currentAuthState }, () => {
-//         console.log('Auth state saved from external message');
+//         Logger.log('Auth state saved from external message');
 
 //         // Broadcast to all extension components
 //         chrome.runtime.sendMessage({
@@ -809,7 +809,7 @@
 //       const token = url.searchParams.get('token');
 
 //       // Debug log the token
-//       console.log('Token from URL parameters (first 10 chars):', 
+//       Logger.log('Token from URL parameters (first 10 chars):', 
 //         token ? token.substring(0, 10) + '...' : 'EMPTY');
 
 //       if (username && role) {
@@ -826,7 +826,7 @@
 
 //         // Store in Chrome storage
 //         chrome.storage.local.set({ authState: currentAuthState }, () => {
-//           console.log('Auth state saved from URL params');
+//           Logger.log('Auth state saved from URL params');
 
 //           // Broadcast to all extension components
 //           chrome.runtime.sendMessage({
@@ -854,7 +854,7 @@
 //         });
 //       }
 //     } catch (error) {
-//       console.error('Error processing auth URL:', error);
+//       Logger.error('Error processing auth URL:', error);
 //     }
 //   }
 // });
@@ -867,6 +867,9 @@
  * between the extension's components.
  */
 
+// Import environment configuration
+importScripts('config.js');
+
 // Global state for authentication
 let currentAuthState = {
   isLoggedIn: false,
@@ -874,24 +877,22 @@ let currentAuthState = {
   token: null
 };
 
-// API endpoint configuration
-const API_BASE_URL = 'http://localhost:3000';
-const AUTH_PAGE_URL = 'http://localhost:5173';
+// API endpoint configuration - now uses environment-aware URLs
 const GEMINI_API_KEY = ""; // REMOVED - Use environment variables instead
 
 // Check storage on initialization
 chrome.storage.local.get(['authState'], (result) => {
   if (result.authState) {
     currentAuthState = result.authState;
-    console.log('Restored auth state:', currentAuthState);
-    console.log('Restored token (first 10 chars):', 
+    Logger.log('Restored auth state:', currentAuthState);
+    Logger.log('Restored token (first 10 chars):', 
       currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY');
   }
 });
 
 // Listen for messages from popup and content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('Background received message:', message.type);
+  Logger.log('Background received message:', message.type);
 
   // Check authentication state
   if (message.type === 'CHECK_AUTH') {
@@ -902,18 +903,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Open authentication page
     // In background.js - modify the existing listener
   if (message.type === 'OPEN_AUTH_PAGE') {
-    console.log('Background script received OPEN_AUTH_PAGE message');
+    Logger.log('Background script received OPEN_AUTH_PAGE message');
     try {
       // Store the original tab ID and URL before redirecting
       chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
         if (!tabs || tabs.length === 0) {
-          console.error('No active tab found');
+          Logger.error('No active tab found');
           sendResponse({ success: false, error: 'No active tab found' });
           return;
         }
         
         const originalTab = tabs[0];
-        console.log('Current tab info:', originalTab.id, originalTab.url);
+        Logger.log('Current tab info:', originalTab.id, originalTab.url);
         
         // Store the original tab information
         chrome.storage.local.set({
@@ -923,30 +924,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }, () => {
           if (chrome.runtime.lastError) {
-            console.error('Error storing tab info:', chrome.runtime.lastError);
+            Logger.error('Error storing tab info:', chrome.runtime.lastError);
             sendResponse({ success: false, error: 'Failed to store tab info' });
             return;
           }
           
           // Construct auth URL
           const authUrl = `${AUTH_PAGE_URL}/?extension=true&returnUrl=${encodeURIComponent(originalTab.url)}`;
-          console.log('Opening auth page URL:', authUrl);
+          Logger.log('Opening auth page URL:', authUrl);
           
           // Open the authentication page
           chrome.tabs.create({ url: authUrl }, (newTab) => {
             if (chrome.runtime.lastError) {
-              console.error('Error creating new tab:', chrome.runtime.lastError);
+              Logger.error('Error creating new tab:', chrome.runtime.lastError);
               sendResponse({ success: false, error: 'Failed to create tab' });
               return;
             }
             
-            console.log('Created new tab with ID:', newTab.id);
+            Logger.log('Created new tab with ID:', newTab.id);
             sendResponse({ success: true });
           });
         });
       });
     } catch (error) {
-      console.error('Error in OPEN_AUTH_PAGE handler:', error);
+      Logger.error('Error in OPEN_AUTH_PAGE handler:', error);
       sendResponse({ success: false, error: error.message });
     }
     
@@ -961,12 +962,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       token: message.token
     };
     
-    console.log('Token being stored (first 10 chars):', 
+    Logger.log('Token being stored (first 10 chars):', 
       currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY');
 
     // Store in Chrome storage
     chrome.storage.local.set({ authState: currentAuthState }, () => {
-      console.log('Auth state saved:', JSON.stringify({
+      Logger.log('Auth state saved:', JSON.stringify({
         ...currentAuthState,
         token: currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY'
       }));
@@ -984,10 +985,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Handle refresh token requests
   if (message.type === 'REFRESH_TOKEN') {
-    console.log('Attempting to refresh token...');
+    Logger.log('Attempting to refresh token...');
     
     if (currentAuthState.isLoggedIn && currentAuthState.token) {
-      console.log('Returning existing token (first 10 chars):', 
+      Logger.log('Returning existing token (first 10 chars):', 
         currentAuthState.token.substring(0, 10) + '...');
       sendResponse({ 
         success: true, 
@@ -997,7 +998,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     
     if (currentAuthState.isLoggedIn) {
-      console.log('No token available, but user is logged in. Attempting server refresh...');
+      Logger.log('No token available, but user is logged in. Attempting server refresh...');
       
       fetch(`${API_BASE_URL}/api/auth/refresh`, {
         method: 'POST',
@@ -1026,7 +1027,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         };
         
         chrome.storage.local.set({ authState: currentAuthState }, () => {
-          console.log('Auth state updated with refreshed token');
+          Logger.log('Auth state updated with refreshed token');
           chrome.runtime.sendMessage({
             type: 'AUTH_CHANGED',
             authState: currentAuthState
@@ -1035,14 +1036,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
       })
       .catch(error => {
-        console.error('Token refresh failed:', error);
+        Logger.error('Token refresh failed:', error);
         sendResponse({ success: false, error: error.message });
       });
       
       return true; // Keep the message channel open for async response
     }
     
-    console.error('Cannot refresh token - not logged in');
+    Logger.error('Cannot refresh token - not logged in');
     sendResponse({ success: false, error: 'Not logged in' });
     return true;
   }
@@ -1058,7 +1059,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // Clear from storage
     chrome.storage.local.remove(['authState'], () => {
-      console.log('Auth state cleared');
+      Logger.log('Auth state cleared');
 
       // Broadcast to all extension components
       chrome.runtime.sendMessage({
@@ -1073,18 +1074,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Get user session token specifically for voice transcript API calls
   if (message.type === 'GET_USER_SESSION_TOKEN') {
-    console.log('Getting user session token for voice transcript API...');
+    Logger.log('Getting user session token for voice transcript API...');
     
     // Check if we have a stored user session token (different from the current token)
     chrome.storage.local.get(['userSessionToken'], (result) => {
       if (result.userSessionToken) {
-        console.log('Found stored user session token:', result.userSessionToken.substring(0, 10) + '...');
+        Logger.log('Found stored user session token:', result.userSessionToken.substring(0, 10) + '...');
         sendResponse({ 
           success: true, 
           sessionToken: result.userSessionToken 
         });
       } else {
-        console.log('No user session token found, user needs to get proper Supabase session token');
+        Logger.log('No user session token found, user needs to get proper Supabase session token');
         sendResponse({ 
           success: false, 
           error: 'No user session token available. Please ensure login process stores the Supabase session token.' 
@@ -1097,11 +1098,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Set user session token for voice transcript API calls
   if (message.type === 'SET_USER_SESSION_TOKEN') {
-    console.log('Setting user session token for voice transcript API...');
+    Logger.log('Setting user session token for voice transcript API...');
     
     if (message.sessionToken) {
       chrome.storage.local.set({ userSessionToken: message.sessionToken }, () => {
-        console.log('User session token stored for voice API');
+        Logger.log('User session token stored for voice API');
         sendResponse({ success: true });
       });
     } else {
@@ -1114,26 +1115,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Handle API requests
  // Handle API requests
 if (message.type === 'API_REQUEST') {
-  console.log('Background script handling API request:', message.url);
+  Logger.log('Background script handling API request:', message.url);
 
   // Extract request details
   const { url, method, headers, body } = message;
   
   // Debug log the authorization header if present
   if (headers && headers.Authorization) {
-    console.log('Authorization header (first 20 chars):', 
+    Logger.log('Authorization header (first 20 chars):', 
       headers.Authorization.substring(0, 20) + '...');
   } else {
-    console.log('No Authorization header present in request');
+    Logger.log('No Authorization header present in request');
   }
 
   // IMPORTANT FIX: Check if body is already a string
   let processedBody = body;
   if (body && typeof body !== 'string') {
     processedBody = JSON.stringify(body);
-    console.log('Stringified request body');
+    Logger.log('Stringified request body');
   } else if (body) {
-    console.log('Body already stringified, using as-is');
+    Logger.log('Body already stringified, using as-is');
   }
 
   // Make the actual fetch request from background script
@@ -1143,7 +1144,7 @@ if (message.type === 'API_REQUEST') {
     body: processedBody // Use the properly processed body
   })
   .then(async (response) => {
-    console.log(`API Response status: ${response.status} ${response.statusText}`);
+    Logger.log(`API Response status: ${response.status} ${response.statusText}`);
     
     // First get the raw text
     const responseText = await response.text();
@@ -1154,7 +1155,7 @@ if (message.type === 'API_REQUEST') {
       data = JSON.parse(responseText);
     } catch (e) {
       // If not valid JSON, use the raw text
-      console.error('Invalid JSON response:', responseText.substring(0, 100));
+      Logger.error('Invalid JSON response:', responseText.substring(0, 100));
       return sendResponse({
         ok: false,
         status: response.status,
@@ -1171,7 +1172,7 @@ if (message.type === 'API_REQUEST') {
     });
   })
   .catch((error) => {
-    console.error('API request failed:', error);
+    Logger.error('API request failed:', error);
     sendResponse({
       ok: false,
       error: error.message
@@ -1196,18 +1197,18 @@ if (message.type === 'API_REQUEST') {
     .then(response => {
       if (!response.ok) {
         return response.text().then(text => {
-          console.error('Error response body:', text);
+          Logger.error('Error response body:', text);
           throw new Error(`API request failed with status ${response.status}: ${text}`);
         });
       }
       return response.json();
     })
     .then(data => {
-      console.log('Gemini API success response:', data);
+      Logger.log('Gemini API success response:', data);
       sendResponse({ success: true, data });
     })
     .catch(error => {
-      console.error('Gemini API error:', error);
+      Logger.error('Gemini API error:', error);
       sendResponse({ success: false, error: error.message });
     });
     
@@ -1222,12 +1223,12 @@ if (message.type === 'API_REQUEST') {
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   // Only accept messages from your authentication page
   if (sender.url && sender.url.startsWith(AUTH_PAGE_URL)) {
-    console.log('Received external message:', message);
+    Logger.log('Received external message:', message);
 
     if (message.type === 'LOGIN_SUCCESS') {
       // Validate required fields
       if (!message.token || !message.userId || !message.username) {
-        console.error('Missing required login data:', message);
+        Logger.error('Missing required login data:', message);
         sendResponse({ success: false, error: 'Invalid login data' });
         return true;
       }
@@ -1241,18 +1242,18 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         },
         token: message.token
       };
-      console.log('Updated auth state:', JSON.stringify({
+      Logger.log('Updated auth state:', JSON.stringify({
         ...currentAuthState,
         token: currentAuthState.token ? currentAuthState.token.substring(0, 10) + '...' : 'EMPTY'
       }));
 
       // Debug log the token
-      console.log('Token received from login page (first 10 chars):', 
+      Logger.log('Token received from login page (first 10 chars):', 
         message.token ? message.token.substring(0, 10) + '...' : 'EMPTY');
 
       // Store in Chrome storage
       chrome.storage.local.set({ authState: currentAuthState }, () => {
-        console.log('Auth state saved from external message');
+        Logger.log('Auth state saved from external message');
 
         // Broadcast to all extension components
         chrome.runtime.sendMessage({
@@ -1295,7 +1296,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       const token = url.searchParams.get('token');
 
       // Debug log the token
-      console.log('Token from URL parameters (first 10 chars):', 
+      Logger.log('Token from URL parameters (first 10 chars):', 
         token ? token.substring(0, 10) + '...' : 'EMPTY');
 
       if (username && role) {
@@ -1312,7 +1313,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
         // Store in Chrome storage
         chrome.storage.local.set({ authState: currentAuthState }, () => {
-          console.log('Auth state saved from URL params');
+          Logger.log('Auth state saved from URL params');
 
           // Broadcast to all extension components
           chrome.runtime.sendMessage({
@@ -1340,7 +1341,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         });
       }
     } catch (error) {
-      console.error('Error processing auth URL:', error);
+      Logger.error('Error processing auth URL:', error);
     }
   }
 });

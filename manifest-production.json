@@ -2,21 +2,18 @@
     "manifest_version": 3,
     "name": "AskLynk - AI-Powered Classroom Assistant",
     "version": "1.0.0",
-    "description": "Transform your classroom with AI-powered anonymous questions, smart transcription, and context-aware assistance for Google Meet, Canvas, and other learning platforms.",
+    "description": "AI-powered classroom assistant with anonymous questions, smart transcription, and context-aware help for online learning.",
     "permissions": [
       "storage",
       "activeTab"
     ],
     "host_permissions": [
-      "https://asklynk-backend.vercel.app/*",
-      "https://asklynk-58z1r8wvq-sharath-chandra-s-projects.vercel.app/*",
-      "http://localhost:3000/*",
-      "http://localhost:5173/*"
+      "https://asklynk-bkend-d5qpx8shx-sharath-chandra-s-projects.vercel.app/*",
+      "https://asklynk-58z1r8wvq-sharath-chandra-s-projects.vercel.app/*"
     ],
     "externally_connectable": {
       "matches": [
-        "https://asklynk-58z1r8wvq-sharath-chandra-s-projects.vercel.app/*",
-        "http://localhost:5173/*"
+        "https://asklynk-58z1r8wvq-sharath-chandra-s-projects.vercel.app/*"
       ]
     },
     "background": {

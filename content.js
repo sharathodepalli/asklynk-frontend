@@ -10,12 +10,6 @@ let chatContainerCreated = false;
 let chatVisible = false;
 let currentUser = null;
 let isInitialized = false;
-let geminiContext = {
-  sessionTitle: '',
-  sessionDescription: '',
-  sessionId: '',
-  messages: []
-};
 
 // Voice capture state variables
 let voiceRecognition = null;
@@ -75,7 +69,7 @@ function extractArrayFromResponse(response, defaultArray = []) {
     }
   }
   
-  console.warn('Could not extract array from response:', response);
+  Logger.warn('Could not extract array from response:', response);
   return defaultArray;
 }
 
@@ -89,7 +83,7 @@ async function getAuthToken() {
       if (response && response.success && response.token) {
         resolve(response.token);
       } else {
-        console.error('Failed to retrieve token from background');
+        Logger.error('Failed to retrieve token from background');
         resolve(null);
       }
     });
@@ -105,10 +99,10 @@ async function getUserSessionToken() {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type: 'GET_USER_SESSION_TOKEN' }, (response) => {
       if (response && response.success && response.sessionToken) {
-        console.log('✅ User session token retrieved for voice API');
+        Logger.log('✅ User session token retrieved for voice API');
         resolve(response.sessionToken);
       } else {
-        console.error('❌ Failed to retrieve user session token, falling back to regular auth token');
+        Logger.error('❌ Failed to retrieve user session token, falling back to regular auth token');
         // Fallback to regular auth token
         getAuthToken().then(resolve);
       }
@@ -123,18 +117,18 @@ async function getUserSessionToken() {
  */
 async function storeUserSessionToken(sessionToken) {
   if (!sessionToken) {
-    console.error('❌ Cannot store empty session token');
+    Logger.error('❌ Cannot store empty session token');
     return false;
   }
   
   // Validate token format (should not be anon key)
   if (sessionToken.includes('"role":"anon"')) {
-    console.error('❌ WRONG TOKEN: This is an anonymous key, not a user session token!');
-    console.error('❌ Expected user session token with role: "authenticated"');
+    Logger.error('❌ WRONG TOKEN: This is an anonymous key, not a user session token!');
+    Logger.error('❌ Expected user session token with role: "authenticated"');
     return false;
   }
   
-  console.log('✅ Storing user session token for voice API:', sessionToken.substring(0, 20) + '...');
+  Logger.log('✅ Storing user session token for voice API:', sessionToken.substring(0, 20) + '...');
   
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({
@@ -142,10 +136,10 @@ async function storeUserSessionToken(sessionToken) {
       sessionToken: sessionToken
     }, (response) => {
       if (response && response.success) {
-        console.log('✅ User session token stored successfully');
+        Logger.log('✅ User session token stored successfully');
         resolve(true);
       } else {
-        console.error('❌ Failed to store user session token:', response?.error);
+        Logger.error('❌ Failed to store user session token:', response?.error);
         resolve(false);
       }
     });
@@ -158,12 +152,12 @@ async function storeUserSessionToken(sessionToken) {
  * Call this from browser console: getAndStoreSupabaseSessionToken()
  */
 window.getAndStoreSupabaseSessionToken = async function() {
-  console.log('🔑 Getting Supabase user session token...');
+  Logger.log('🔑 Getting Supabase user session token...');
   
   // Check if Supabase is available
   if (typeof window.supabase === 'undefined') {
-    console.error('❌ Supabase not available. Please ensure Supabase client is loaded.');
-    console.log('💡 Alternative: Manually set token with setTestUserSessionToken("your_token_here")');
+    Logger.error('❌ Supabase not available. Please ensure Supabase client is loaded.');
+    Logger.log('💡 Alternative: Manually set token with setTestUserSessionToken("your_token_here")');
     return;
   }
   
@@ -172,33 +166,33 @@ window.getAndStoreSupabaseSessionToken = async function() {
     const { data: { session }, error } = await window.supabase.auth.getSession();
     
     if (error) {
-      console.error('❌ Error getting Supabase session:', error);
+      Logger.error('❌ Error getting Supabase session:', error);
       return;
     }
     
     if (!session) {
-      console.error('❌ No active Supabase session found. Please log in first.');
+      Logger.error('❌ No active Supabase session found. Please log in first.');
       return;
     }
     
     if (!session.access_token) {
-      console.error('❌ No access token in session');
+      Logger.error('❌ No access token in session');
       return;
     }
     
-    console.log('✅ Found Supabase session for user:', session.user.email);
-    console.log('✅ Session token:', session.access_token.substring(0, 20) + '...');
+    Logger.log('✅ Found Supabase session for user:', session.user.email);
+    Logger.log('✅ Session token:', session.access_token.substring(0, 20) + '...');
     
     // Store the user session token
     const stored = await storeUserSessionToken(session.access_token);
     
     if (stored) {
-      console.log('🎉 SUCCESS: User session token stored! Voice transcripts will now use the correct token.');
-      console.log('🧪 Test voice capture now - it should save to database');
+      Logger.log('🎉 SUCCESS: User session token stored! Voice transcripts will now use the correct token.');
+      Logger.log('🧪 Test voice capture now - it should save to database');
     }
     
   } catch (error) {
-    console.error('❌ Error accessing Supabase session:', error);
+    Logger.error('❌ Error accessing Supabase session:', error);
   }
 };
 
@@ -207,10 +201,13 @@ window.getAndStoreSupabaseSessionToken = async function() {
  */
 function checkAuthState() {
   chrome.runtime.sendMessage({ type: 'CHECK_AUTH' }, (response) => {
-    console.log("Auth check response:", response);
+    Logger.log("Auth check response:", response);
     if (response && response.isLoggedIn) {
       currentUser = response.user;
-      console.log('User is authenticated:', currentUser);
+      Logger.log('User is authenticated:', currentUser);
+      
+      // CRITICAL: Restore active session for students!
+      restoreActiveSession();
       
       // Update UI if chat container exists
       if (chatContainerCreated) {
@@ -220,7 +217,37 @@ function checkAuthState() {
       // Update floating button appearance
       updateDraggableButton(); 
     } else {
-      console.log('User is not authenticated');
+      Logger.log('User is not authenticated');
+    }
+  });
+}
+
+/**
+ * Restore the active session from storage - CRITICAL for students to use context-aware AI
+ */
+function restoreActiveSession() {
+  chrome.storage.local.get(['activeSession'], (result) => {
+    if (result.activeSession) {
+      let sessionId = null;
+      
+      // Handle different possible response structures from session data
+      if (result.activeSession.data && result.activeSession.data.id) {
+        sessionId = result.activeSession.data.id;
+      } else if (result.activeSession.id) {
+        sessionId = result.activeSession.id;
+      } else if (result.activeSession.ok && result.activeSession.data && result.activeSession.data.id) {
+        sessionId = result.activeSession.data.id;
+      }
+      
+      if (sessionId) {
+        currentSessionId = sessionId;
+        Logger.log('✅ RESTORED currentSessionId for student:', sessionId);
+        Logger.log('🎯 Student can now use PERSONALIZED AI endpoint!');
+      } else {
+        Logger.log('❌ Could not extract session ID from stored session data');
+      }
+    } else {
+      Logger.log('❌ No active session found in storage');
     }
   });
 }
@@ -352,7 +379,7 @@ function formatAIResponse(text) {
  */
 function initializeVoiceCapture() {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-    console.warn('Speech recognition not supported in this browser');
+    Logger.warn('Speech recognition not supported in this browser');
     showToast('Voice capture not supported in this browser', 'error');
     return false;
   }
@@ -371,7 +398,7 @@ function initializeVoiceCapture() {
     let finalTranscript = '';
     let interimTranscript = '';
     
-    console.log('🎤 Voice recognition onresult triggered, results count:', event.results.length);
+    Logger.log('🎤 Voice recognition onresult triggered, results count:', event.results.length);
     
     // Mark voice activity detected
     voiceActivityDetected = true;
@@ -384,16 +411,16 @@ function initializeVoiceCapture() {
       
       if (event.results[i].isFinal) {
         finalTranscript += transcript;
-        console.log('🎯 Final transcript detected:', transcript);
+        Logger.log('🎯 Final transcript detected:', transcript);
       } else {
         interimTranscript += transcript;
-        console.log('🔄 Interim transcript:', transcript);
+        Logger.log('🔄 Interim transcript:', transcript);
       }
     }
     
     // Add final transcript to buffer
     if (finalTranscript.trim()) {
-      console.log('📝 Adding final transcript to buffer:', finalTranscript.trim());
+      Logger.log('📝 Adding final transcript to buffer:', finalTranscript.trim());
       addToTranscriptBuffer(finalTranscript.trim());
       consecutiveSilenceCount = 0; // Reset silence counter on speech
     }
@@ -403,7 +430,7 @@ function initializeVoiceCapture() {
   };
   
   voiceRecognition.onerror = (event) => {
-    console.error('🚨 Speech recognition error:', event.error);
+    Logger.error('🚨 Speech recognition error:', event.error);
     
     switch (event.error) {
       case 'not-allowed':
@@ -411,7 +438,7 @@ function initializeVoiceCapture() {
         stopVoiceCapture();
         break;
       case 'no-speech':
-        console.log('⏸️ No speech detected, but continuing to listen...');
+        Logger.log('⏸️ No speech detected, but continuing to listen...');
         consecutiveSilenceCount++;
         // Don't stop - just log the silence
         break;
@@ -421,7 +448,7 @@ function initializeVoiceCapture() {
         scheduleVoiceRecognitionRestart('network error');
         break;
       case 'aborted':
-        console.log('🔄 Speech recognition aborted, restarting...');
+        Logger.log('🔄 Speech recognition aborted, restarting...');
         scheduleVoiceRecognitionRestart('aborted');
         break;
       case 'audio-capture':
@@ -429,29 +456,29 @@ function initializeVoiceCapture() {
         scheduleVoiceRecognitionRestart('audio capture error');
         break;
       default:
-        console.warn('⚠️ Speech recognition error:', event.error);
+        Logger.warn('⚠️ Speech recognition error:', event.error);
         scheduleVoiceRecognitionRestart(`unknown error: ${event.error}`);
     }
   };
   
   voiceRecognition.onend = () => {
-    console.log('🔚 Voice recognition ended');
+    Logger.log('🔚 Voice recognition ended');
     
     // NEVER stop automatically due to silence - always restart unless manually paused
     if (isVoiceCapturing && currentSessionId && !isManuallyPaused) {
-      console.log('🔄 Auto-restarting voice recognition for continuous capture...');
+      Logger.log('🔄 Auto-restarting voice recognition for continuous capture...');
       scheduleVoiceRecognitionRestart('normal end event');
     } else if (isManuallyPaused) {
-      console.log('⏸️ Voice recognition paused manually');
+      Logger.log('⏸️ Voice recognition paused manually');
       updateVoiceRecognitionUI('Paused - Click to resume');
     } else {
-      console.log('❌ Voice recognition stopped (capture disabled or no session)');
+      Logger.log('❌ Voice recognition stopped (capture disabled or no session)');
       updateVoiceRecognitionUI('Stopped');
     }
   };
   
   voiceRecognition.onstart = () => {
-    console.log('🎤 Voice recognition started successfully');
+    Logger.log('🎤 Voice recognition started successfully');
     restartAttempts = 0; // Reset restart attempts on successful start
     updateVoiceRecognitionUI('Listening for voice...');
     
@@ -482,12 +509,12 @@ function addToTranscriptBuffer(transcript) {
     voiceTranscriptBuffer = transcript;
   }
   
-  console.log('Added to buffer:', transcript);
-  console.log('Current buffer length:', voiceTranscriptBuffer.length);
+  Logger.log('Added to buffer:', transcript);
+  Logger.log('Current buffer length:', voiceTranscriptBuffer.length);
   
   // Check if buffer is getting too long (safety measure)
   if (voiceTranscriptBuffer.length > 1000) {
-    console.log('Buffer getting too long, processing early');
+    Logger.log('Buffer getting too long, processing early');
     processTranscriptChunk();
   }
 }
@@ -496,15 +523,15 @@ function addToTranscriptBuffer(transcript) {
  * Start timer for chunk processing
  */
 function startChunkTimer() {
-  console.log('⏰ Starting chunk timer for', CHUNK_DURATION / 1000, 'seconds');
+  Logger.log('⏰ Starting chunk timer for', CHUNK_DURATION / 1000, 'seconds');
   
   if (chunkTimer) {
     clearTimeout(chunkTimer);
-    console.log('⏰ Cleared existing timer');
+    Logger.log('⏰ Cleared existing timer');
   }
   
   chunkTimer = setTimeout(() => {
-    console.log('⏰ Timer expired, processing chunk');
+    Logger.log('⏰ Timer expired, processing chunk');
     processTranscriptChunk();
   }, CHUNK_DURATION);
 }
@@ -513,27 +540,27 @@ function startChunkTimer() {
  * Process and send the current transcript chunk
  */
 async function processTranscriptChunk() {
-  console.log('processTranscriptChunk called, buffer content:', voiceTranscriptBuffer);
+  Logger.log('processTranscriptChunk called, buffer content:', voiceTranscriptBuffer);
   
   if (!voiceTranscriptBuffer.trim()) {
-    console.log('Empty buffer, skipping chunk processing');
+    Logger.log('Empty buffer, skipping chunk processing');
     resetTranscriptBuffer();
     return;
   }
   
   const chunkToProcess = voiceTranscriptBuffer.trim();
-  console.log('Processing transcript chunk:', chunkToProcess);
-  console.log('Chunk length:', chunkToProcess.length);
+  Logger.log('Processing transcript chunk:', chunkToProcess);
+  Logger.log('Chunk length:', chunkToProcess.length);
   
   // Reset buffer for next chunk
   resetTranscriptBuffer();
   
   // Send to backend for processing and embedding generation
   try {
-    console.log('Calling sendTranscriptToBackend with:', chunkToProcess.substring(0, 50) + '...');
+    Logger.log('Calling sendTranscriptToBackend with:', chunkToProcess.substring(0, 50) + '...');
     await sendTranscriptToBackend(chunkToProcess);
   } catch (error) {
-    console.error('Error processing transcript chunk:', error);
+    Logger.error('Error processing transcript chunk:', error);
     // Could implement retry logic here
   }
 }
@@ -555,15 +582,15 @@ function resetTranscriptBuffer() {
  * Can be called from browser console: testVoiceTranscriptSending()
  */
 window.testVoiceTranscriptSending = async function() {
-  console.log('🧪 Testing voice transcript sending...');
+  Logger.log('🧪 Testing voice transcript sending...');
   
   if (!currentSessionId) {
-    console.error('❌ No active session ID. Please start a session first.');
+    Logger.error('❌ No active session ID. Please start a session first.');
     return;
   }
   
   const testTranscript = "This is a test transcript to verify backend integration is working properly with the correct user session token.";
-  console.log('🧪 Sending test transcript:', testTranscript);
+  Logger.log('🧪 Sending test transcript:', testTranscript);
   
   await sendTranscriptToBackend(testTranscript);
 };
@@ -573,27 +600,27 @@ window.testVoiceTranscriptSending = async function() {
  * Can be called from browser console: setTestUserSessionToken('your_token_here')
  */
 window.setTestUserSessionToken = async function(sessionToken) {
-  console.log('🧪 Setting test user session token...');
+  Logger.log('🧪 Setting test user session token...');
   
   if (!sessionToken) {
-    console.error('❌ Please provide a session token');
-    console.log('💡 Usage: setTestUserSessionToken("eyJhbGciOiJIUzI1NiIsImtpZCI6...")');
+    Logger.error('❌ Please provide a session token');
+    Logger.log('💡 Usage: setTestUserSessionToken("eyJhbGciOiJIUzI1NiIsImtpZCI6...")');
     return;
   }
   
   // Validate token format
   if (sessionToken.includes('"role":"anon"')) {
-    console.error('❌ WRONG TOKEN: This appears to be an anonymous key!');
-    console.error('❌ You need the user session token, not the anon key');
-    console.log('💡 Get the correct token with: getAndStoreSupabaseSessionToken()');
+    Logger.error('❌ WRONG TOKEN: This appears to be an anonymous key!');
+    Logger.error('❌ You need the user session token, not the anon key');
+    Logger.log('💡 Get the correct token with: getAndStoreSupabaseSessionToken()');
     return;
   }
   
   const stored = await storeUserSessionToken(sessionToken);
   
   if (stored) {
-    console.log('✅ Test user session token set successfully');
-    console.log('🧪 Now test voice capture: testVoiceTranscriptSending()');
+    Logger.log('✅ Test user session token set successfully');
+    Logger.log('🧪 Now test voice capture: testVoiceTranscriptSending()');
   }
 };
 
@@ -601,30 +628,30 @@ window.setTestUserSessionToken = async function(sessionToken) {
  * Test function to check what token is currently being used
  */
 window.checkCurrentTokenType = async function() {
-  console.log('🔍 Checking current token type...');
+  Logger.log('🔍 Checking current token type...');
   
   try {
     const userToken = await getUserSessionToken();
     const regularToken = await getAuthToken();
     
-    console.log('🔍 User session token:', userToken ? userToken.substring(0, 20) + '...' : 'NOT SET');
-    console.log('🔍 Regular auth token:', regularToken ? regularToken.substring(0, 20) + '...' : 'NOT SET');
+    Logger.log('🔍 User session token:', userToken ? userToken.substring(0, 20) + '...' : 'NOT SET');
+    Logger.log('🔍 Regular auth token:', regularToken ? regularToken.substring(0, 20) + '...' : 'NOT SET');
     
     if (userToken && userToken !== regularToken) {
-      console.log('✅ GOOD: Using separate user session token for voice API');
+      Logger.log('✅ GOOD: Using separate user session token for voice API');
       
       // Check if it's an anon key
       if (userToken.includes('"role":"anon"')) {
-        console.log('❌ WARNING: User session token appears to be an anon key!');
+        Logger.log('❌ WARNING: User session token appears to be an anon key!');
       } else {
-        console.log('✅ EXCELLENT: User session token appears to be correct');
+        Logger.log('✅ EXCELLENT: User session token appears to be correct');
       }
     } else {
-      console.log('❌ WARNING: Voice API will use regular auth token (likely anon key)');
+      Logger.log('❌ WARNING: Voice API will use regular auth token (likely anon key)');
     }
     
   } catch (error) {
-    console.error('❌ Error checking tokens:', error);
+    Logger.error('❌ Error checking tokens:', error);
   }
 };
 
@@ -632,28 +659,28 @@ window.checkCurrentTokenType = async function() {
  * Test function to check current voice capture state
  */
 window.checkVoiceCaptureState = function() {
-  console.log('🔍 Voice Capture State Check:');
-  console.log('- isVoiceCapturing:', isVoiceCapturing);
-  console.log('- isManuallyPaused:', isManuallyPaused);
-  console.log('- currentSessionId:', currentSessionId);
-  console.log('- voiceRecognition:', voiceRecognition);
-  console.log('- voiceTranscriptBuffer:', voiceTranscriptBuffer);
-  console.log('- bufferStartTime:', bufferStartTime);
-  console.log('- chunkTimer:', chunkTimer);
-  console.log('- voiceActivityDetected:', voiceActivityDetected);
-  console.log('- lastVoiceActivityTime:', lastVoiceActivityTime ? new Date(lastVoiceActivityTime).toLocaleTimeString() : 'Never');
-  console.log('- restartAttempts:', restartAttempts);
-  console.log('- currentUser:', currentUser);
+  Logger.log('🔍 Voice Capture State Check:');
+  Logger.log('- isVoiceCapturing:', isVoiceCapturing);
+  Logger.log('- isManuallyPaused:', isManuallyPaused);
+  Logger.log('- currentSessionId:', currentSessionId);
+  Logger.log('- voiceRecognition:', voiceRecognition);
+  Logger.log('- voiceTranscriptBuffer:', voiceTranscriptBuffer);
+  Logger.log('- bufferStartTime:', bufferStartTime);
+  Logger.log('- chunkTimer:', chunkTimer);
+  Logger.log('- voiceActivityDetected:', voiceActivityDetected);
+  Logger.log('- lastVoiceActivityTime:', lastVoiceActivityTime ? new Date(lastVoiceActivityTime).toLocaleTimeString() : 'Never');
+  Logger.log('- restartAttempts:', restartAttempts);
+  Logger.log('- currentUser:', currentUser);
   
   const timeSinceActivity = lastVoiceActivityTime ? Date.now() - lastVoiceActivityTime : 0;
-  console.log('- Time since last activity:', Math.floor(timeSinceActivity / 1000), 'seconds');
+  Logger.log('- Time since last activity:', Math.floor(timeSinceActivity / 1000), 'seconds');
 };
 
 /**
  * Manual pause function for debugging/testing
  */
 window.manualPauseVoiceCapture = function() {
-  console.log('🧪 Manually pausing voice capture...');
+  Logger.log('🧪 Manually pausing voice capture...');
   pauseVoiceCapture();
 };
 
@@ -661,7 +688,7 @@ window.manualPauseVoiceCapture = function() {
  * Manual resume function for debugging/testing
  */
 window.manualResumeVoiceCapture = function() {
-  console.log('🧪 Manually resuming voice capture...');
+  Logger.log('🧪 Manually resuming voice capture...');
   resumeVoiceCapture();
 };
 
@@ -669,10 +696,10 @@ window.manualResumeVoiceCapture = function() {
  * Force restart voice recognition for debugging
  */
 window.forceRestartVoiceCapture = function() {
-  console.log('🧪 Force restarting voice recognition...');
+  Logger.log('🧪 Force restarting voice recognition...');
   
   if (!isVoiceCapturing) {
-    console.error('❌ Voice capture is not active');
+    Logger.error('❌ Voice capture is not active');
     return;
   }
   
@@ -684,18 +711,18 @@ window.forceRestartVoiceCapture = function() {
  * Check voice capture configuration
  */
 window.checkVoiceCaptureConfig = function() {
-  console.log('⚙️ Voice Capture Configuration:');
-  console.log(VOICE_CAPTURE_CONFIG);
-  console.log('');
-  console.log('📊 Current Performance:');
-  console.log('- Restart attempts:', restartAttempts);
-  console.log('- Manual pause:', isManuallyPaused);
-  console.log('- Activity detected:', voiceActivityDetected);
+  Logger.log('⚙️ Voice Capture Configuration:');
+  Logger.log(VOICE_CAPTURE_CONFIG);
+  Logger.log('');
+  Logger.log('📊 Current Performance:');
+  Logger.log('- Restart attempts:', restartAttempts);
+  Logger.log('- Manual pause:', isManuallyPaused);
+  Logger.log('- Activity detected:', voiceActivityDetected);
   
   if (lastVoiceActivityTime) {
     const timeSince = Date.now() - lastVoiceActivityTime;
-    console.log('- Time since activity:', Math.floor(timeSince / 1000), 'seconds');
-    console.log('- Activity timestamp:', new Date(lastVoiceActivityTime).toLocaleTimeString());
+    Logger.log('- Time since activity:', Math.floor(timeSince / 1000), 'seconds');
+    Logger.log('- Activity timestamp:', new Date(lastVoiceActivityTime).toLocaleTimeString());
   }
 };
 
@@ -703,38 +730,37 @@ window.checkVoiceCaptureConfig = function() {
  * Test AI Assistant status and provide troubleshooting info
  */
 window.checkAIAssistantStatus = function() {
-  console.log('🤖 AI Assistant Status Check:');
-  console.log('');
+  Logger.log('🤖 AI Assistant Status Check:');
+  Logger.log('');
   
-  // Check if Gemini context is initialized
-  console.log('📋 Context Status:');
-  console.log('- Session ID:', geminiContext.sessionId || 'Not set');
-  console.log('- Session Title:', geminiContext.sessionTitle || 'Not set');
-  console.log('- Message History:', geminiContext.messages.length, 'messages');
+  // Check current session status
+  Logger.log('📋 Context Status:');
+  Logger.log('- Session ID:', currentSessionId || 'Not set');
+  Logger.log('- User Status:', currentUser ? 'Logged in' : 'Not logged in');
+  Logger.log('- Enhanced Backend:', typeof makeEnhancedBackendRequest === 'function' ? 'Available' : 'Not available');
   
-  console.log('');
-  console.log('🔧 Troubleshooting Common AI Issues:');
-  console.log('');
-  console.log('❌ Error 429 (Quota Exceeded):');
-  console.log('  • This is a Gemini API limit, not an extension bug');
-  console.log('  • Voice capture continues working normally');
-  console.log('  • Wait 60+ seconds and try again');
-  console.log('  • Consider upgrading to Gemini Pro for higher limits');
-  console.log('');
-  console.log('❌ Authentication Issues:');
-  console.log('  • Check if GEMINI_API_KEY is set correctly');
-  console.log('  • Verify API key has proper permissions');
-  console.log('');
-  console.log('✅ What Still Works:');
-  console.log('  • Voice capture and transcription');
-  console.log('  • Anonymous questions');
-  console.log('  • Session management');
-  console.log('  • All other extension features');
+  Logger.log('');
+  Logger.log('🔧 Troubleshooting Common AI Issues:');
+  Logger.log('');
+  Logger.log('❌ Authentication Issues:');
+  Logger.log('  • Make sure you are logged in');
+  Logger.log('  • Verify you have joined a session');
+  Logger.log('  • Check your internet connection');
+  Logger.log('');
+  Logger.log('❌ Session Issues:');
+  Logger.log('  • Create or join a session first');
+  Logger.log('  • Ensure the session is still active');
+  Logger.log('');
+  Logger.log('✅ What Still Works:');
+  Logger.log('  • Voice capture and transcription');
+  Logger.log('  • Anonymous questions');
+  Logger.log('  • Session management');
+  Logger.log('  • All other extension features');
   
   return {
-    contextInitialized: !!geminiContext.sessionId,
-    messageCount: geminiContext.messages.length,
-    sessionActive: !!currentSessionId
+    sessionActive: !!currentSessionId,
+    userLoggedIn: !!currentUser,
+    enhancedBackend: typeof makeEnhancedBackendRequest === 'function'
   };
 };
 
@@ -742,28 +768,33 @@ window.checkAIAssistantStatus = function() {
  * Test function to manually try AI request (for debugging)
  */
 window.testAIRequest = async function(question = "Hello, this is a test message") {
-  console.log('🧪 Testing AI request manually...');
+  Logger.log('🧪 Testing Enhanced Backend AI request manually...');
   
-  if (!geminiContext.sessionId) {
-    console.error('❌ No session context. Please start or join a session first.');
+  if (!currentSessionId) {
+    Logger.error('❌ No active session. Please start or join a session first.');
+    return;
+  }
+  
+  if (!currentUser) {
+    Logger.error('❌ No user logged in. Please log in first.');
     return;
   }
   
   try {
-    console.log('📤 Sending test question:', question);
+    Logger.log('📤 Sending test question to Enhanced Backend:', question);
     
-    const contextPrompt = `You are an AI teaching assistant for the session "${geminiContext.sessionTitle}". 
-    Help students understand the material and answer their questions clearly.`;
-    
-    const response = await makeGeminiRequest(question, contextPrompt);
-    console.log('✅ AI Response received:', response.substring(0, 100) + '...');
+    const response = await makeEnhancedBackendRequest(question);
+    Logger.log('✅ Enhanced Backend AI Response received:', response.substring(0, 100) + '...');
     return response;
   } catch (error) {
-    console.error('❌ AI Request failed:', error.message);
+    Logger.error('❌ Enhanced Backend AI Request failed:', error.message);
     
-    if (error.message.includes('429') || error.message.includes('quota')) {
-      console.log('💡 This is a quota limit issue - wait and try again');
-      console.log('💡 Voice capture continues working normally');
+    if (error.message.includes('401')) {
+      Logger.log('💡 Authentication issue - try logging out and back in');
+    } else if (error.message.includes('404')) {
+      Logger.log('💡 Session not found - make sure you are in an active session');
+    } else {
+      Logger.log('💡 Check your internet connection and try again');
     }
     
     return null;
@@ -784,7 +815,7 @@ function restartVoiceRecognition() {
       }
     }, 1000);
   } catch (error) {
-    console.error('Error in restartVoiceRecognition:', error);
+    Logger.error('Error in restartVoiceRecognition:', error);
   }
 }
 
@@ -794,13 +825,13 @@ function restartVoiceRecognition() {
  */
 function scheduleVoiceRecognitionRestart(reason) {
   if (!isVoiceCapturing || !currentSessionId || isManuallyPaused) {
-    console.log('🚫 Skipping restart - capture disabled, no session, or manually paused');
+    Logger.log('🚫 Skipping restart - capture disabled, no session, or manually paused');
     return;
   }
   
   // Prevent infinite restart loops
   if (restartAttempts >= VOICE_CAPTURE_CONFIG.MAX_RESTART_ATTEMPTS) {
-    console.warn('⚠️ Max restart attempts reached, waiting longer before retry...');
+    Logger.warn('⚠️ Max restart attempts reached, waiting longer before retry...');
     restartAttempts = 0; // Reset for next cycle
     setTimeout(() => {
       if (isVoiceCapturing && !isManuallyPaused) {
@@ -818,15 +849,15 @@ function scheduleVoiceRecognitionRestart(reason) {
     VOICE_CAPTURE_CONFIG.RESTART_DELAY_MAX
   );
   
-  console.log(`🔄 Scheduling voice recognition restart #${restartAttempts} due to: ${reason} (delay: ${delay}ms)`);
+  Logger.log(`🔄 Scheduling voice recognition restart #${restartAttempts} due to: ${reason} (delay: ${delay}ms)`);
   
   setTimeout(() => {
     if (isVoiceCapturing && !isManuallyPaused && voiceRecognition) {
       try {
-        console.log(`🎤 Attempting restart #${restartAttempts}...`);
+        Logger.log(`🎤 Attempting restart #${restartAttempts}...`);
         voiceRecognition.start();
       } catch (error) {
-        console.error('❌ Error during scheduled restart:', error);
+        Logger.error('❌ Error during scheduled restart:', error);
         // Try again with longer delay
         setTimeout(() => {
           if (isVoiceCapturing && !isManuallyPaused) {
@@ -863,7 +894,7 @@ function startSilenceMonitoring() {
         now - lastNotificationTime > VOICE_CAPTURE_CONFIG.SILENCE_NOTIFICATION_THRESHOLD) {
       
       const minutes = Math.floor(timeSinceLastActivity / 60000);
-      console.log(`🔕 ${minutes} minutes of silence detected, but continuing to listen...`);
+      Logger.log(`🔕 ${minutes} minutes of silence detected, but continuing to listen...`);
       
       showToast(`Voice capture active - ${minutes}min of silence. Still listening...`, 'info', 5000);
       lastNotificationTime = now;
@@ -874,7 +905,7 @@ function startSilenceMonitoring() {
         now - lastNotificationTime > VOICE_CAPTURE_CONFIG.ACTIVITY_TIMEOUT) {
       
       const minutes = Math.floor(timeSinceLastActivity / 60000);
-      console.log(`⏸️ Suggesting manual pause after ${minutes} minutes of silence`);
+      Logger.log(`⏸️ Suggesting manual pause after ${minutes} minutes of silence`);
       
       showToast(
         `Voice capture has been quiet for ${minutes} minutes. Consider pausing to save resources.`,
@@ -891,7 +922,7 @@ function startSilenceMonitoring() {
  * Manually pause voice capture (professor can resume when ready)
  */
 function pauseVoiceCapture() {
-  console.log('⏸️ Manually pausing voice capture');
+  Logger.log('⏸️ Manually pausing voice capture');
   
   isManuallyPaused = true;
   
@@ -899,7 +930,7 @@ function pauseVoiceCapture() {
     try {
       voiceRecognition.stop();
     } catch (error) {
-      console.error('Error pausing voice recognition:', error);
+      Logger.error('Error pausing voice recognition:', error);
     }
   }
   
@@ -919,10 +950,10 @@ function pauseVoiceCapture() {
  * Resume voice capture from manual pause
  */
 function resumeVoiceCapture() {
-  console.log('▶️ Resuming voice capture from manual pause');
+  Logger.log('▶️ Resuming voice capture from manual pause');
   
   if (!isVoiceCapturing || !currentSessionId) {
-    console.error('Cannot resume - voice capture not active or no session');
+    Logger.error('Cannot resume - voice capture not active or no session');
     return;
   }
   
@@ -937,7 +968,7 @@ function resumeVoiceCapture() {
       showToast('Voice capture resumed', 'success');
     }
   } catch (error) {
-    console.error('Error resuming voice recognition:', error);
+    Logger.error('Error resuming voice recognition:', error);
     scheduleVoiceRecognitionRestart('resume error');
   }
 }
@@ -947,22 +978,22 @@ function resumeVoiceCapture() {
  * @param {string} sessionId - The session ID to associate with voice capture
  */
 function startVoiceCapture(sessionId) {
-  console.log('Attempting to start voice capture for session:', sessionId);
+  Logger.log('Attempting to start voice capture for session:', sessionId);
   
   // Validate prerequisites
   if (!currentUser || currentUser.role !== 'professor') {
-    console.log('Voice capture only available for professors');
+    Logger.log('Voice capture only available for professors');
     return false;
   }
   
   if (!sessionId) {
-    console.error('Cannot start voice capture: no session ID provided');
+    Logger.error('Cannot start voice capture: no session ID provided');
     showToast('Cannot start voice capture: no active session', 'error');
     return false;
   }
   
   if (isVoiceCapturing) {
-    console.log('Voice capture already active for session:', currentSessionId);
+    Logger.log('Voice capture already active for session:', currentSessionId);
     return true;
   }
   
@@ -983,19 +1014,19 @@ function startVoiceCapture(sessionId) {
     restartAttempts = 0;
     resetTranscriptBuffer();
     
-    console.log('🎯 Starting smart continuous voice capture...');
+    Logger.log('🎯 Starting smart continuous voice capture...');
     
     // Request microphone permission and start recognition
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then(() => {
-        console.log('🎤 Microphone permission granted');
+        Logger.log('🎤 Microphone permission granted');
         voiceRecognition.start();
-        console.log('✅ Voice capture started for session:', sessionId);
+        Logger.log('✅ Voice capture started for session:', sessionId);
         showVoiceRecordingIndicator(true, false);
         showToast('Smart voice capture started - will continuously listen during lecture', 'success');
       })
       .catch((error) => {
-        console.error('❌ Microphone permission denied:', error);
+        Logger.error('❌ Microphone permission denied:', error);
         isVoiceCapturing = false;
         isManuallyPaused = false;
         currentSessionId = null;
@@ -1004,7 +1035,7 @@ function startVoiceCapture(sessionId) {
       
     return true;
   } catch (error) {
-    console.error('❌ Error starting voice capture:', error);
+    Logger.error('❌ Error starting voice capture:', error);
     isVoiceCapturing = false;
     isManuallyPaused = false;
     currentSessionId = null;
@@ -1017,7 +1048,7 @@ function startVoiceCapture(sessionId) {
  * Stop voice capture with proper cleanup
  */
 function stopVoiceCapture() {
-  console.log('🛑 Stopping voice capture');
+  Logger.log('🛑 Stopping voice capture');
   
   if (!isVoiceCapturing) {
     return;
@@ -1025,7 +1056,7 @@ function stopVoiceCapture() {
   
   // Process any remaining transcript in buffer
   if (voiceTranscriptBuffer.trim()) {
-    console.log('📝 Processing final transcript chunk before stopping');
+    Logger.log('📝 Processing final transcript chunk before stopping');
     processTranscriptChunk();
   }
   
@@ -1049,7 +1080,7 @@ function stopVoiceCapture() {
     try {
       voiceRecognition.stop();
     } catch (error) {
-      console.error('❌ Error stopping voice recognition:', error);
+      Logger.error('❌ Error stopping voice recognition:', error);
     }
   }
   
@@ -1057,7 +1088,7 @@ function stopVoiceCapture() {
   showVoiceRecordingIndicator(false, false);
   updateVoiceRecognitionUI('');
   
-  console.log('✅ Voice capture stopped completely');
+  Logger.log('✅ Voice capture stopped completely');
   showToast('Voice capture stopped', 'info');
 }
 
@@ -1185,24 +1216,24 @@ function updateVoiceRecognitionUI(status) {
  * @param {string} transcript - The transcribed text chunk from speech
  */
 async function sendTranscriptToBackend(transcript) {
-  console.log('🎤 sendTranscriptToBackend called with transcript:', transcript.substring(0, 100) + '...');
+  Logger.log('🎤 sendTranscriptToBackend called with transcript:', transcript.substring(0, 100) + '...');
   
   if (!transcript || transcript.length < 5) {
-    console.log('❌ Skipping short transcript:', transcript);
+    Logger.log('❌ Skipping short transcript:', transcript);
     return; // Ignore very short utterances
   }
   
-  console.log('✅ Sending transcript to backend (length:', transcript.length, ')');
+  Logger.log('✅ Sending transcript to backend (length:', transcript.length, ')');
   
   try {
     // Use user session token instead of regular auth token for voice API
     const authToken = await getUserSessionToken();
     if (!authToken) {
-      console.error('❌ No user session token available for voice transcript');
+      Logger.error('❌ No user session token available for voice transcript');
       return;
     }
     
-    console.log('✅ User session token retrieved:', authToken.substring(0, 10) + '...');
+    Logger.log('✅ User session token retrieved:', authToken.substring(0, 10) + '...');
     
     // Validate token type for debugging
     try {
@@ -1210,31 +1241,31 @@ async function sendTranscriptToBackend(transcript) {
       const tokenRole = tokenPayload.role;
       const tokenIss = tokenPayload.iss;
       
-      console.log('🔍 Token validation:');
-      console.log('  - Role:', tokenRole);
-      console.log('  - Issuer:', tokenIss);
-      console.log('  - Subject (User ID):', tokenPayload.sub);
+      Logger.log('🔍 Token validation:');
+      Logger.log('  - Role:', tokenRole);
+      Logger.log('  - Issuer:', tokenIss);
+      Logger.log('  - Subject (User ID):', tokenPayload.sub);
       
       if (tokenRole === 'anon') {
-        console.error('❌ CRITICAL: Using ANONYMOUS token for voice API!');
-        console.error('❌ This token will NOT save to database!');
-        console.error('💡 Fix: Call getAndStoreSupabaseSessionToken() first');
-        console.error('💡 Or use: setTestUserSessionToken("correct_user_token")');
+        Logger.error('❌ CRITICAL: Using ANONYMOUS token for voice API!');
+        Logger.error('❌ This token will NOT save to database!');
+        Logger.error('💡 Fix: Call getAndStoreSupabaseSessionToken() first');
+        Logger.error('💡 Or use: setTestUserSessionToken("correct_user_token")');
       } else if (tokenRole === 'authenticated') {
-        console.log('✅ EXCELLENT: Using USER SESSION token - will save to database!');
+        Logger.log('✅ EXCELLENT: Using USER SESSION token - will save to database!');
       } else {
-        console.warn('⚠️ Unknown token role:', tokenRole);
+        Logger.warn('⚠️ Unknown token role:', tokenRole);
       }
     } catch (e) {
-      console.warn('⚠️ Could not decode token for validation');
+      Logger.warn('⚠️ Could not decode token for validation');
     }
     
     if (!currentSessionId) {
-      console.error('❌ No current session ID available');
+      Logger.error('❌ No current session ID available');
       return;
     }
     
-    console.log('✅ Current session ID:', currentSessionId);
+    Logger.log('✅ Current session ID:', currentSessionId);
     
     const payload = {
       transcript: transcript,
@@ -1245,13 +1276,13 @@ async function sendTranscriptToBackend(transcript) {
       processingType: 'voice_chunk' // Helps backend identify this as voice data
     };
     
-    console.log('📤 Sending payload to backend:', {
+    Logger.log('📤 Sending payload to backend:', {
       ...payload,
       transcript: payload.transcript.substring(0, 50) + '...'
     });
     
-    const apiUrl = `http://localhost:3000/api/sessions/${currentSessionId}/voice-transcript`;
-    console.log('🌐 API URL:', apiUrl);
+    const apiUrl = `${API_BASE_URL}/api/sessions/${currentSessionId}/voice-transcript`;
+    Logger.log('🌐 API URL:', apiUrl);
     
     // Send transcript to backend for processing and embedding generation
     chrome.runtime.sendMessage({
@@ -1264,10 +1295,10 @@ async function sendTranscriptToBackend(transcript) {
       },
       body: payload
     }, (response) => {
-      console.log('📥 Backend response received:', response);
+      Logger.log('📥 Backend response received:', response);
       
       if (response && response.ok) {
-        console.log('✅ Voice transcript processed successfully:', {
+        Logger.log('✅ Voice transcript processed successfully:', {
           chunkLength: transcript.length,
           processingTime: response.data?.processingTime,
           embeddingGenerated: response.data?.embeddingGenerated
@@ -1275,22 +1306,22 @@ async function sendTranscriptToBackend(transcript) {
         
         // Optional: Show success indicator (but don't spam user)
         if (response.data?.embeddingGenerated) {
-          console.log('🧠 Embedding generated for transcript chunk');
+          Logger.log('🧠 Embedding generated for transcript chunk');
         }
       } else {
-        console.error('❌ Error processing voice transcript. Status:', response?.status);
-        console.error('❌ Error details:', response?.data);
-        console.error('❌ Error message:', response?.error);
-        console.error('❌ Full response object:', JSON.stringify(response, null, 2));
+        Logger.error('❌ Error processing voice transcript. Status:', response?.status);
+        Logger.error('❌ Error details:', response?.data);
+        Logger.error('❌ Error message:', response?.error);
+        Logger.error('❌ Full response object:', JSON.stringify(response, null, 2));
         
         // Show detailed error information
         if (response?.data) {
-          console.error('🔍 Backend error details:', response.data);
+          Logger.error('🔍 Backend error details:', response.data);
           if (response.data.message) {
-            console.error('🔍 Backend error message:', response.data.message);
+            Logger.error('🔍 Backend error message:', response.data.message);
           }
           if (response.data.errors) {
-            console.error('🔍 Backend validation errors:', response.data.errors);
+            Logger.error('🔍 Backend validation errors:', response.data.errors);
           }
         }
         
@@ -1302,7 +1333,7 @@ async function sendTranscriptToBackend(transcript) {
     });
     
   } catch (error) {
-    console.error('❌ Error sending transcript to backend:', error);
+    Logger.error('❌ Error sending transcript to backend:', error);
   }
 }
 
@@ -1346,14 +1377,14 @@ function toggleChat() {
     }, 300);
   }
   
-  console.log('Chat visibility toggled:', chatVisible);
+  Logger.log('Chat visibility toggled:', chatVisible);
 }
 
 /**
  * Updates the UI based on current user information
  */
 function updateChatUI() {
-  console.log('Updating chat UI with user:', currentUser);
+  Logger.log('Updating chat UI with user:', currentUser);
   
   if (!chatContainerCreated) return;
   
@@ -1424,14 +1455,7 @@ function createChatContainer() {
   
   if (chatContainerCreated) return;
   
-  console.log("Creating chat container");
-  
-  // Check for active session and initialize Gemini
-  chrome.storage.local.get(['activeSession'], (result) => {
-    if (result.activeSession) {
-      initGeminiContext(result.activeSession);
-    }
-  });
+  Logger.log("Creating chat container");
 
   // Create chat container
   const chatContainer = document.createElement("div");
@@ -1580,12 +1604,12 @@ function createChatContainer() {
     
     // Logout functionality
     logoutOption.addEventListener('click', () => {
-      console.log('Logout button clicked');
+      Logger.log('Logout button clicked');
       
       // Confirm logout
       if (confirm('Are you sure you want to log out?')) {
         chrome.runtime.sendMessage({ type: 'LOGOUT' }, (response) => {
-          console.log('Logout response:', response);
+          Logger.log('Logout response:', response);
           if (response && response.success) {
             toggleChat(); // Hide chat
             currentUser = null;
@@ -1602,7 +1626,7 @@ function createChatContainer() {
   // Add the appropriate dashboard based on user role
   renderRoleBasedDashboard();
   
-  console.log('Chat container created successfully');
+  Logger.log('Chat container created successfully');
 }
 
 /**
@@ -1697,7 +1721,7 @@ function positionChatContainer(button) {
  * Function to show authentication required message
  */
 function showAuthRequiredMessage() {
-  console.log('Showing auth required message');
+  Logger.log('Showing auth required message');
   
   // Remove any existing message
   const existingMessage = document.getElementById('lynkk-auth-message');
@@ -1741,11 +1765,11 @@ function showAuthRequiredMessage() {
   
   if (signinBtn) {
     signinBtn.addEventListener('click', () => {
-      console.log('Opening authentication page');
+      Logger.log('Opening authentication page');
       chrome.runtime.sendMessage({ type: 'OPEN_AUTH_PAGE' }, (response) => {
-        console.log('Response from background script:', response);
+        Logger.log('Response from background script:', response);
         if (chrome.runtime.lastError) {
-          console.error('Error sending message:', chrome.runtime.lastError);
+          Logger.error('Error sending message:', chrome.runtime.lastError);
         }
       });
       messageContainer.remove();
@@ -1795,7 +1819,7 @@ function showAuthRequiredMessage() {
  * @returns {HTMLElement} The created button
  */
 function createDraggableChatButton() {
-  console.log('Creating draggable chat button');
+  Logger.log('Creating draggable chat button');
   
   // Check if button already exists
   if (document.getElementById('lynkk-float-button')) {
@@ -1905,11 +1929,11 @@ function createDraggableChatButton() {
       return;
     }
     
-    console.log('Button clicked, checking auth...');
+    Logger.log('Button clicked, checking auth...');
     
     // Re-check auth state to ensure it's current
     chrome.runtime.sendMessage({ type: 'CHECK_AUTH' }, (response) => {
-      console.log('Auth check response:', response);
+      Logger.log('Auth check response:', response);
       
       if (response && response.isLoggedIn) {
         // User is authenticated, show chat
@@ -2028,7 +2052,7 @@ function createDraggableChatButton() {
   
   // Add button to the page
   document.body.appendChild(button);
-  console.log('Draggable chat button created');
+  Logger.log('Draggable chat button created');
   
   // Restore saved position if available, but validate it's on screen
   const savedPosition = localStorage.getItem('lynkkButtonPosition');
@@ -2059,7 +2083,7 @@ function createDraggableChatButton() {
         button.style.bottom = '20px';
       }
     } catch (e) {
-      console.error('Error restoring button position:', e);
+      Logger.error('Error restoring button position:', e);
     }
   }
   
@@ -2446,10 +2470,10 @@ function loadProfessorSessionHistory() {
       }
       
       const professorId = result.authState.user.id;
-      const apiBaseUrl = 'http://localhost:3000';
+      const apiBaseUrl = API_BASE_URL;
       const sessionsUrl = `${apiBaseUrl}/api/sessions/professor/${professorId}`;
       
-      console.log('Fetching sessions from URL:', sessionsUrl);
+      Logger.log('Fetching sessions from URL:', sessionsUrl);
       
       // Make API request for sessions
       chrome.runtime.sendMessage({
@@ -2461,7 +2485,7 @@ function loadProfessorSessionHistory() {
           'Authorization': `Bearer ${authToken}`
         }
       }, (response) => {
-        console.log('Session API response:', response);
+        Logger.log('Session API response:', response);
         
         if (!response || !response.ok) {
           // Handle API error
@@ -2818,7 +2842,7 @@ async function loadStudentSessionHistory() {
       chrome.runtime.sendMessage({
         type: 'API_REQUEST',
         // Fix URL to match your backend API route
-        url: `http://localhost:3000/api/students/${userId}/sessions`,
+        url: `${API_BASE_URL}/api/students/${userId}/sessions`,
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -2826,9 +2850,9 @@ async function loadStudentSessionHistory() {
         }
       }, (response) => {
         // Rest of the function remains the same
-        console.log('Student session history response:', response);
+        Logger.log('Student session history response:', response);
         if (!response.ok || response.error) {
-          console.error('Error fetching student sessions:', response.error || 'Unknown error');
+          Logger.error('Error fetching student sessions:', response.error || 'Unknown error');
           sessionListContainer.innerHTML = `
             <div style="text-align: center; padding: 16px; background-color: white; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
               <p style="color: #64748b; margin: 0;">Could not load sessions. Please try again later.</p>
@@ -2943,7 +2967,7 @@ function endSession(sessionId) {
   
   // Stop voice capture if this is the current session
   if (isVoiceCapturing && currentSessionId === sessionId) {
-    console.log('Stopping voice capture for ending session:', sessionId);
+    Logger.log('Stopping voice capture for ending session:', sessionId);
     stopVoiceCapture();
   }
   
@@ -2962,7 +2986,7 @@ function endSession(sessionId) {
   // Send the API request to end the session
   chrome.runtime.sendMessage({
     type: 'API_REQUEST',
-    url: `http://localhost:3000/api/sessions/${sessionId}/end`,
+    url: `${API_BASE_URL}/api/sessions/${sessionId}/end`,
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -2970,7 +2994,7 @@ function endSession(sessionId) {
     }
   }, (response) => {
     if (chrome.runtime.lastError) {
-      console.error('Runtime error:', chrome.runtime.lastError);
+      Logger.error('Runtime error:', chrome.runtime.lastError);
       alert(`Error ending session: ${chrome.runtime.lastError.message}`);
       
       // Restore button
@@ -2984,7 +3008,7 @@ function endSession(sessionId) {
     }
     
     if (!response.ok || response.error) {
-      console.error('API response error:', response.error || 'Unknown error');
+      Logger.error('API response error:', response.error || 'Unknown error');
       alert(`Error ending session: ${response.error || 'Unknown error'}`);
       
       // Restore button
@@ -3262,7 +3286,7 @@ function showCreateSessionModal() {
         }
       });
     } else {
-      console.error('Back button element not found after DOM update');
+      Logger.error('Back button element not found after DOM update');
     }
     
     // Focus on title input
@@ -3389,7 +3413,7 @@ async function createSession() {
     // Make API request to create session
     chrome.runtime.sendMessage({
       type: 'API_REQUEST',
-      url: 'http://localhost:3000/api/sessions',
+      url: '${API_BASE_URL}/api/sessions',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -3406,24 +3430,24 @@ async function createSession() {
       submitButton.disabled = false;
       
       if (chrome.runtime.lastError) {
-        console.error('Runtime error:', chrome.runtime.lastError);
+        Logger.error('Runtime error:', chrome.runtime.lastError);
         showToast(`Error: ${chrome.runtime.lastError.message}`, 'error');
         return;
       }
       
       if (!response.ok || response.error) {
-        console.error('API response error:', response.error || 'Unknown error');
+        Logger.error('API response error:', response.error || 'Unknown error');
         showToast(`Error creating session: ${response.error || 'Unknown error'}`, 'error');
         return;
       }
       
-      console.log('Session created successfully:', response.data);
+      Logger.log('Session created successfully:', response.data);
       
       // Start voice capture for the new session if user is professor
       if (currentUser && currentUser.role === 'professor' && response.data) {
         const sessionId = response.data.id || response.data.data?.id;
         if (sessionId) {
-          console.log('Starting voice capture for new session:', sessionId);
+          Logger.log('Starting voice capture for new session:', sessionId);
           setTimeout(() => {
             startVoiceCapture(sessionId);
           }, 1000); // Small delay to ensure session is fully set up
@@ -3442,7 +3466,7 @@ async function createSession() {
       }, 3000); // Give user time to see and interact with success dialog first
     });
   } catch (error) {
-    console.error('Error getting auth token:', error);
+    Logger.error('Error getting auth token:', error);
     submitButton.innerHTML = originalButtonHTML;
     submitButton.disabled = false;
     showToast('Authentication error. Please try again.', 'error');
@@ -3457,7 +3481,7 @@ function showSessionSuccessDialog(sessionData) {
   // Get the dashboard container to determine where to add the dialog
   const dashboardContainer = document.getElementById('lynkk-dashboard-container');
   if (!dashboardContainer) return;
-  console.log('sessionData:', sessionData);
+  Logger.log('sessionData:', sessionData);
   // Create session code for display - fixed to properly extract code
   const sessionCode = sessionData.join_code || sessionData.data.code || 'N/A';
   
@@ -3559,7 +3583,7 @@ function showSessionSuccessDialog(sessionData) {
     viewSessionBtn.addEventListener('click', () => {
       closeSuccessDialog();
       if (sessionData && sessionData.data.id) {
-console.log('wwwwwOpening session with ID:', sessionData.data.id);
+Logger.log('wwwwwOpening session with ID:', sessionData.data.id);
         openSession(sessionData.data.id);
       }
     });
@@ -3655,7 +3679,7 @@ console.log('wwwwwOpening session with ID:', sessionData.data.id);
 //     // Make API request to create session
 //     chrome.runtime.sendMessage({
 //       type: 'API_REQUEST',
-//       url: 'http://localhost:3000/api/sessions',
+//       url: '${API_BASE_URL}/api/sessions',
 //       method: 'POST',
 //       headers: {
 //         'Content-Type': 'application/json',
@@ -3672,18 +3696,18 @@ console.log('wwwwwOpening session with ID:', sessionData.data.id);
 //       submitButton.disabled = false;
       
 //       if (chrome.runtime.lastError) {
-//         console.error('Runtime error:', chrome.runtime.lastError);
+//         Logger.error('Runtime error:', chrome.runtime.lastError);
 //         showToast(`Error: ${chrome.runtime.lastError.message}`, 'error');
 //         return;
 //       }
       
 //       if (!response.ok || response.error) {
-//         console.error('API response error:', response.error || 'Unknown error');
+//         Logger.error('API response error:', response.error || 'Unknown error');
 //         showToast(`Error creating session: ${response.error || 'Unknown error'}`, 'error');
 //         return;
 //       }
       
-//       console.log('Session created successfully:', response.data);
+//       Logger.log('Session created successfully:', response.data);
       
 //       // Close the modal
 //       const modal = document.getElementById('lynkk-create-session-modal');
@@ -3706,7 +3730,7 @@ console.log('wwwwwOpening session with ID:', sessionData.data.id);
 //       }
 //     });
 //   } catch (error) {
-//     console.error('Error getting auth token:', error);
+//     Logger.error('Error getting auth token:', error);
 //     submitButton.innerHTML = originalButtonHTML;
 //     submitButton.disabled = false;
 //     showToast('Authentication error. Please try again.', 'error');
@@ -3761,12 +3785,12 @@ console.log('wwwwwOpening session with ID:', sessionData.data.id);
             return;
             }
             
-            console.log('Attempting to join session with code:', sessionCode);
+            Logger.log('Attempting to join session with code:', sessionCode);
             
             // Make API request to join session
             chrome.runtime.sendMessage({
             type: 'API_REQUEST',
-            url: `http://localhost:3000/api/sessions/join`,
+            url: `${API_BASE_URL}/api/sessions/join`,
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -3779,10 +3803,10 @@ console.log('wwwwwOpening session with ID:', sessionData.data.id);
             joinButton.disabled = false;
             sessionCodeInput.disabled = false;
             
-            console.log('Join session response:', response);
+            Logger.log('Join session response:', response);
             
             if (!response || !response.ok || response.error) {
-                console.error('Error joining session:', response ? (response.error || 'Unknown error') : 'No response received');
+                Logger.error('Error joining session:', response ? (response.error || 'Unknown error') : 'No response received');
                 errorElement.textContent = response && response.error ? response.error : 'Failed to join session. Please check the code and try again.';
                 errorElement.style.display = 'block';
                 return;
@@ -3801,13 +3825,13 @@ console.log('wwwwwOpening session with ID:', sessionData.data.id);
             }
             
             if (!sessionData || !sessionData.id) {
-                console.error('Invalid session data in response:', response.data);
+                Logger.error('Invalid session data in response:', response.data);
                 errorElement.textContent = 'Invalid session response';
                 errorElement.style.display = 'block';
                 return;
             }
             
-            console.log('Session joined successfully:', sessionData);
+            Logger.log('Session joined successfully:', sessionData);
             
             // Show success toast
             showToast('Successfully joined session!', 'success');
@@ -3816,7 +3840,7 @@ console.log('wwwwwOpening session with ID:', sessionData.data.id);
             openSession(sessionData.id);
             });
         } catch (error) {
-            console.error('Error in joinSession:', error);
+            Logger.error('Error in joinSession:', error);
             
             // Reset states
             joinButton.innerHTML = originalContent;
@@ -3836,14 +3860,14 @@ console.log('wwwwwOpening session with ID:', sessionData.data.id);
  * @param {string} sessionId - The session ID
  */
 async function openSession(sessionId) {
-  console.log(`Opening session with ID: ${sessionId}`);
+  Logger.log(`Opening session with ID: ${sessionId}`);
   
   try {
     // Get auth token using the existing getAuthToken function
     const authToken = await getAuthToken();
     
     if (!authToken) {
-      console.error('No auth token available');
+      Logger.error('No auth token available');
       showToast('Authentication error - please log in again', 'error');
       return;
     }
@@ -3876,34 +3900,31 @@ async function openSession(sessionId) {
     // Fetch session data
     chrome.runtime.sendMessage({
       type: 'API_REQUEST',
-      url: `http://localhost:3000/api/sessions/${sessionId}`,
+      url: `${API_BASE_URL}/api/sessions/${sessionId}`,
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${authToken}`
       }
     }, (response) => {
       if (!response.ok || response.error) {
-        console.error('Error fetching session:', response.error || 'Unknown error');
+        Logger.error('Error fetching session:', response.error || 'Unknown error');
         showToast('Could not open session. Please try again later.', 'error');
         return;
       }
       
       const session = response.data;
-      console.log('Session opened successfully:', session);
-      
-      // Initialize Gemini context with session data
-      initGeminiContext(session);
+      Logger.log('Session opened successfully:', session);
       
       // Store session data
       chrome.storage.local.set({ 
         activeSession: session,
         activeTab: 'ai' // Set AI tab as default active tab
       }, () => {
-        console.log('Session stored in local storage');
+        Logger.log('Session stored in local storage');
         
         // Start voice capture if user is professor
         if (currentUser && currentUser.role === 'professor') {
-          console.log('Starting voice capture for session:', sessionId);
+          Logger.log('Starting voice capture for session:', sessionId);
           setTimeout(() => {
             startVoiceCapture(sessionId);
           }, 1000); // Small delay to ensure session is fully set up
@@ -3917,7 +3938,7 @@ async function openSession(sessionId) {
         
         // Load previous AI conversations for this session
         loadPreviousAIConversations().then(messages => {
-          console.log(`Loaded ${messages.length} previous AI messages for this session`);
+          Logger.log(`Loaded ${messages.length} previous AI messages for this session`);
           
           // Display previous AI messages in the UI
           if (messages.length > 0) {
@@ -3930,14 +3951,8 @@ async function openSession(sessionId) {
               aiMessagesContainer.innerHTML = welcomeMsgHtml;
             }
             
-            // Add each message to the UI and to the geminiContext
+            // Add each message to the UI
             messages.forEach(message => {
-              // Add to geminiContext for conversation continuity
-              geminiContext.messages.push({
-                role: message.role,
-                content: message.content
-              });
-              
               // Display in UI
               showAIMessage({
                 content: message.content,
@@ -3947,7 +3962,7 @@ async function openSession(sessionId) {
             });
           }
         }).catch(error => {
-          console.error('Error loading previous AI conversations:', error);
+          Logger.error('Error loading previous AI conversations:', error);
         });
 
         // Show the AI tab by default
@@ -3955,7 +3970,7 @@ async function openSession(sessionId) {
       });
     });
   } catch (error) {
-    console.error('Error opening session:', error);
+    Logger.error('Error opening session:', error);
     showToast('An error occurred. Please try again.', 'error');
   }
 }
@@ -3966,14 +3981,18 @@ async function openSession(sessionId) {
  */
 async function loadSessionData(sessionId) {
   try {
+    // Set the current session ID globally - THIS IS CRITICAL FOR STUDENTS!
+    currentSessionId = sessionId;
+    Logger.log(`🎯 Setting currentSessionId to: ${sessionId}`);
+    
     // Get auth token
     const authToken = await getAuthToken();
     
     if (!authToken) {
-      console.error('No auth token available');
+      Logger.error('No auth token available');
       return;
     }
-    console.log(`Loading data for session: ${sessionId}`);
+    Logger.log(`Loading data for session: ${sessionId}`);
     
     // Get auth token
     const authState = await new Promise(resolve => {
@@ -3981,11 +4000,11 @@ async function loadSessionData(sessionId) {
     });
   
     // Load messages
-    console.log('Fetching messages...');
+    Logger.log('Fetching messages...');
     const messagesResponse = await new Promise(resolve => {
       chrome.runtime.sendMessage({
         type: 'API_REQUEST',
-        url: `http://localhost:3000/api/sessions/${sessionId}/messages`,
+        url: `${API_BASE_URL}/api/sessions/${sessionId}/messages`,
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${authToken}`
@@ -3994,21 +4013,21 @@ async function loadSessionData(sessionId) {
     });
     
     if (messagesResponse.ok && messagesResponse.data) {
-      console.log(`Loaded ${messagesResponse.data.length} messages`);
+      Logger.log(`Loaded ${messagesResponse.data.length} messages`);
       // Store messages in local storage
       chrome.storage.local.set({ sessionMessages: messagesResponse.data });
       // Render chat messages (won't be visible until chat tab is active)
       renderChatMessages(messagesResponse.data);
     } else {
-      console.error('Failed to load messages:', messagesResponse.error);
+      Logger.error('Failed to load messages:', messagesResponse.error);
     }
     
     // Load polls
-    console.log('Fetching polls...');
+    Logger.log('Fetching polls...');
     const pollsResponse = await new Promise(resolve => {
       chrome.runtime.sendMessage({
         type: 'API_REQUEST',
-        url: `http://localhost:3000/api/sessions/${sessionId}/polls`,
+        url: `${API_BASE_URL}/api/sessions/${sessionId}/polls`,
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${authToken}`
@@ -4017,30 +4036,30 @@ async function loadSessionData(sessionId) {
     });
     
     if (pollsResponse.ok && pollsResponse.data) {
-      console.log(`Loaded ${pollsResponse.data.length} polls`);
+      Logger.log(`Loaded ${pollsResponse.data.length} polls`);
       // Store polls in local storage
       chrome.storage.local.set({ sessionPolls: pollsResponse.data });
       // Render polls (won't be visible until polls tab is active)
       renderPolls(pollsResponse.data);
     } else {
-      console.error('Failed to load polls:', pollsResponse.error);
+      Logger.error('Failed to load polls:', pollsResponse.error);
     }
     
     // Load anonymous questions (for students)
-    console.log('Fetching anonymous questions...');
+    Logger.log('Fetching anonymous questions...');
     const anonymousResponse = await new Promise(resolve => {
       chrome.runtime.sendMessage({
         type: 'API_REQUEST',
-        url: `http://localhost:3000/api/anonymous/user/${sessionId}`,
+        url: `${API_BASE_URL}/api/anonymous/user/${sessionId}`,
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${authToken}`
         }
       }, resolve);
     });
-    console.log('Anonymous questions response:', anonymousResponse);
+    Logger.log('Anonymous questions response:', anonymousResponse);
     if (anonymousResponse.ok && anonymousResponse.data) {
-      console.log(`Loaded ${anonymousResponse.data.length} anonymous questions`);
+      Logger.log(`Loaded ${anonymousResponse.data.length} anonymous questions`);
       // Store anonymous questions in local storage
       chrome.storage.local.set({ anonymousQuestions: anonymousResponse.data });
       
@@ -4050,16 +4069,16 @@ async function loadSessionData(sessionId) {
       if (container) {
         loadStudentQuestionsForSession(sessionId, authToken);
       } else {
-        console.log('Student questions container not found - will load later when tab is active');
+        Logger.log('Student questions container not found - will load later when tab is active');
       }
     }
     
     // Setup session analytics (student count, message count, etc.)
-    console.log('Fetching analytics...');
+    Logger.log('Fetching analytics...');
     const analyticsResponse = await new Promise(resolve => {
       chrome.runtime.sendMessage({
         type: 'API_REQUEST',
-        url: `http://localhost:3000/api/sessions/${sessionId}/analytics`,
+        url: `${API_BASE_URL}/api/sessions/${sessionId}/analytics`,
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${authToken}`
@@ -4069,18 +4088,18 @@ async function loadSessionData(sessionId) {
 
     // Better error handling
     if (analyticsResponse.ok && analyticsResponse.data) {
-      console.log('Loaded analytics:', analyticsResponse.data);
+      Logger.log('Loaded analytics:', analyticsResponse.data);
       // Store analytics in local storage
       chrome.storage.local.set({ sessionAnalytics: analyticsResponse.data });
       // Update analytics display
       updateAnalyticsDisplay(analyticsResponse.data);
     } else {
-      console.error('Failed to load analytics:', analyticsResponse.error || 'Unknown error');
+      Logger.error('Failed to load analytics:', analyticsResponse.error || 'Unknown error');
       // Display fallback message in UI
       updateAnalyticsDisplay(null);
     }
   } catch (error) {
-    console.error('Error loading session data:', error);
+    Logger.error('Error loading session data:', error);
   }
 }
 /**
@@ -4088,11 +4107,11 @@ async function loadSessionData(sessionId) {
  * @param {Object} analytics - The analytics data
  */
 function updateAnalyticsDisplay(analytics) {
-    console.log('Updating analytics display with:', analytics);
+    Logger.log('Updating analytics display with:', analytics);
     
     // Check if analytics data is available
     if (!analytics) {
-      console.warn('No analytics data available');
+      Logger.warn('No analytics data available');
       return;
     }
     
@@ -4427,11 +4446,37 @@ function renderSessionTabs() {
         <div class="lynkk-tab-content">
           <!-- AI Tab -->
           <div id="lynkk-ai-content" class="lynkk-content active">
-            <div class="lynkk-ai-container">
-              <div class="lynkk-ai-messages" id="lynkk-ai-messages">
-                <div class="lynkk-welcome-message">
-                  <h2 style="font-size: 20px; font-weight: 600; color: #111827;">Welcome to AskLynk AI Assistant</h2>
-                  <p style="font-size: 14px; color: #6b7280;">Ask your questions and get instant answers!</p>
+            <!-- ChatGPT-style AI interface for context-aware AI -->
+            <div style="display: flex; flex-direction: column; height: 100%; background-color: #ffffff;">
+              <!-- Chat messages area -->
+              <div id="lynkk-ai-messages" style="flex: 1; overflow-y: auto; padding: 0; display: flex; flex-direction: column;">
+                <!-- Welcome message for context-aware AI -->
+                <div style="padding: 32px 20px; text-align: center; color: #6e6e80;">
+                  <div style="font-size: 32px; margin-bottom: 16px;">🎓</div>
+                  <div style="font-size: 20px; font-weight: 600; margin-bottom: 8px; color: #202123;">Context-Aware AI Assistant</div>
+                  <div style="font-size: 14px;">Ask questions about your current session content</div>
+                </div>
+              </div>
+              
+              <!-- Input area -->
+              <div style="padding: 20px; border-top: 1px solid #e5e5e5; background: #ffffff;">
+                <div style="max-width: 768px; margin: 0 auto; position: relative;">
+                  <textarea 
+                    id="lynkk-ai-input" 
+                    placeholder="Ask about this session..." 
+                    style="width: 100%; min-height: 44px; max-height: 120px; padding: 12px 48px 12px 16px; border: 1px solid #d1d5db; border-radius: 12px; font-size: 14px; resize: none; outline: none; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #ffffff;"
+                    rows="1"
+                  ></textarea>
+                  <button 
+                    id="lynkk-ai-send" 
+                    style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; background: #19c37d; border: none; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background-color 0.2s;"
+                    disabled
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: white;">
+                      <path d="m22 2-7 20-4-9-9-4Z"/>
+                      <path d="M22 2 11 13"/>
+                    </svg>
+                  </button>
                 </div>
               </div>
             </div>
@@ -4471,24 +4516,7 @@ function renderSessionTabs() {
           </div>
         </div>
         
-        <!-- Input Boxes - Fixed to Bottom -->
-        <div id="lynkk-ai-input-container" class="lynkk-bottom-bar">
-          <div class="lynkk-input-group">
-            <input 
-              type="text" 
-              id="lynkk-ai-input" 
-              placeholder="Ask the AI assistant..." 
-              class="lynkk-input"
-            />
-            <button id="lynkk-ai-send" class="lynkk-send-btn">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="22" y1="2" x2="11" y2="13"></line>
-                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-              </svg>
-            </button>
-          </div>
-        </div>
-        
+        <!-- Input Boxes - Only for Chat Tab -->
         <div id="lynkk-chat-input-container" class="lynkk-bottom-bar" style="display: none;">
           <div class="lynkk-input-group">
             <input 
@@ -4502,11 +4530,9 @@ function renderSessionTabs() {
             </button>
           </div>
         </div>
-        
-        <div id="lynkk-anonymous-input-container" class="lynkk-bottom-bar" style="display: none;">
-          <!-- No specific input container for anonymous tab as it's handled in the form component -->
         </div>
         
+        <!-- Polls Input for Professors -->
         <div id="lynkk-polls-input-container" class="lynkk-bottom-bar" style="display: none;">
           ${currentUser && currentUser.role === 'professor' ? `
           <div class="lynkk-input-group">
@@ -4522,9 +4548,7 @@ function renderSessionTabs() {
     
     // Set initial input container visibility state
     document.getElementById('lynkk-chat-input-container').style.display = 'none';
-    document.getElementById('lynkk-anonymous-input-container').style.display = 'none';
     document.getElementById('lynkk-polls-input-container').style.display = 'none';
-    document.getElementById('lynkk-ai-input-container').style.display = 'block'; // Make sure AI input is visible
   
     // Add event listeners for tab switching
     document.querySelectorAll('.lynkk-tab').forEach(tab => {
@@ -4542,25 +4566,50 @@ function renderSessionTabs() {
       }
     });
     
-    // Add event listeners for AI functionality
-    document.getElementById('lynkk-ai-send').addEventListener('click', () => {
-      const aiInput = document.getElementById('lynkk-ai-input');
-      const question = aiInput.value.trim();
-      if (question) {
-        sendAIQuestion(question);
-        aiInput.value = '';
-      }
-    });
+    // Add event listeners for new ChatGPT-style AI functionality
+    const aiInput = document.getElementById('lynkk-ai-input');
+    const aiSendBtn = document.getElementById('lynkk-ai-send');
     
-    document.getElementById('lynkk-ai-input').addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        const question = e.target.value.trim();
-        if (question) {
-          sendAIQuestion(question);
-          e.target.value = '';
+    // Auto-resize textarea
+    aiInput.addEventListener('input', () => {
+      aiInput.style.height = 'auto';
+      aiInput.style.height = Math.min(aiInput.scrollHeight, 120) + 'px';
+      
+      // Enable/disable send button
+      const hasContent = aiInput.value.trim().length > 0;
+      aiSendBtn.disabled = !hasContent;
+      aiSendBtn.style.background = hasContent ? '#19c37d' : '#d1d5db';
+      aiSendBtn.style.cursor = hasContent ? 'pointer' : 'not-allowed';
+    });
+
+    // Send on Enter (but not Shift+Enter)
+    aiInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (aiInput.value.trim()) {
+          sendSmartAIMessage();
         }
       }
     });
+
+    // Send button click
+    aiSendBtn.addEventListener('click', () => {
+      if (aiInput.value.trim()) {
+        Logger.log('🚀 AI Send Button Clicked - Starting Smart Routing...');
+        Logger.log('📍 Current State:', {
+          currentSessionId: currentSessionId,
+          currentUser: currentUser?.username || 'Not logged in',
+          inputValue: aiInput.value.trim()
+        });
+        sendSmartAIMessage();
+      }
+    });
+
+    // Initialize AI interface based on session status
+    initializeAIInterface();
+    
+    // Focus input
+    setTimeout(() => aiInput.focus(), 100);
     
     // Initialize poll creation for professors
     if (currentUser && currentUser.role === 'professor') {
@@ -4573,7 +4622,57 @@ function renderSessionTabs() {
     // Render custom components for the anonymous tab
     renderAnonymousComponents();
   }
+
+/**
+ * Initialize AI interface with appropriate messaging based on session status
+ */
+function initializeAIInterface() {
+  const aiInput = document.getElementById('lynkk-ai-input');
+  const aiMessages = document.getElementById('lynkk-ai-messages');
   
+  if (!aiInput || !aiMessages) return;
+  
+  const activeSession = getCurrentSession();
+  
+  // Update placeholder based on session status
+  if (activeSession) {
+    aiInput.placeholder = "Ask about this session...";
+  } else {
+    aiInput.placeholder = "Ask me anything educational...";
+  }
+  
+  // Initialize welcome message
+  setTimeout(() => {
+    const welcomeDiv = document.createElement('div');
+    welcomeDiv.setAttribute('data-welcome', 'true');
+    
+    if (activeSession) {
+      // Context-aware AI welcome message
+      welcomeDiv.innerHTML = `
+        <div style="padding: 32px 20px; text-align: center; color: #6e6e80;">
+          <div style="font-size: 32px; margin-bottom: 16px;">🎓</div>
+          <div style="font-size: 20px; font-weight: 600; margin-bottom: 8px; color: #202123;">Context-Aware AI Assistant</div>
+          <div style="font-size: 14px;">Ask questions about your current session content, transcripts, and class materials</div>
+          <div style="font-size: 12px; margin-top: 8px; color: #9ca3af;">✨ This AI has access to your session context</div>
+        </div>
+      `;
+    } else {
+      // Generic AI welcome message
+      welcomeDiv.innerHTML = `
+        <div style="padding: 32px 20px; text-align: center; color: #6e6e80;">
+          <div style="font-size: 32px; margin-bottom: 16px;">🤖</div>
+          <div style="font-size: 20px; font-weight: 600; margin-bottom: 8px; color: #202123;">Educational AI Assistant</div>
+          <div style="font-size: 14px;">Ask me anything about educational topics, homework help, or general knowledge</div>
+          <div style="font-size: 12px; margin-top: 8px; color: #9ca3af;">📚 Safe, educational responses designed for academic use</div>
+        </div>
+      `;
+    }
+    
+    // Clear existing messages and add new welcome message
+    aiMessages.innerHTML = '';
+    aiMessages.appendChild(welcomeDiv);
+  }, 100);
+}
 
   
  function showQuestionDetailModal(question) {
@@ -4828,7 +4927,7 @@ function renderProfessorQuestionDashboard(container, sessionId, authToken) {
   function handleVisibilityChange() {
     const autoRefreshToggle = document.getElementById('lynkk-auto-refresh');
     if (document.visibilityState === 'visible' && autoRefreshToggle && autoRefreshToggle.checked) {
-      console.log('Tab became visible, refreshing questions...');
+      Logger.log('Tab became visible, refreshing questions...');
       refreshQuestions();
     }
   }
@@ -4852,13 +4951,13 @@ function renderProfessorQuestionDashboard(container, sessionId, authToken) {
 
   // Improved auto-refresh management
   function startAutoRefresh() {
-    console.log('Starting auto-refresh');
+    Logger.log('Starting auto-refresh');
     stopAutoRefresh(); // Ensure we clean up any existing interval
     
     // Set up the refresh interval - only refreshes when tab is visible
     refreshInterval = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        console.log('Auto-refreshing questions...');
+        Logger.log('Auto-refreshing questions...');
         refreshQuestions();
       }
     }, 60000); // 1-minute refresh
@@ -4871,7 +4970,7 @@ function renderProfessorQuestionDashboard(container, sessionId, authToken) {
   }
 
   function stopAutoRefresh() {
-    console.log('Stopping auto-refresh');
+    Logger.log('Stopping auto-refresh');
     // Clear interval if it exists
     if (refreshInterval) {
       clearInterval(refreshInterval);
@@ -4932,7 +5031,7 @@ function renderProfessorQuestionDashboard(container, sessionId, authToken) {
       
       // Set up toggle change event
       autoRefreshToggle.addEventListener('change', () => {
-        console.log('Auto-refresh toggle changed:', autoRefreshToggle.checked);
+        Logger.log('Auto-refresh toggle changed:', autoRefreshToggle.checked);
         
         // Save preference
         localStorage.setItem(`autoRefresh_${sessionId}`, autoRefreshToggle.checked);
@@ -5027,7 +5126,7 @@ if (container && !container._cleanupOverridden) {
   container._cleanupOverridden = true;
   Element.prototype.remove = function() {
     if (this === container) {
-      console.log('Question dashboard being removed, cleaning up resources');
+      Logger.log('Question dashboard being removed, cleaning up resources');
       stopAutoRefresh();
     }
     originalRemove.call(this);
@@ -5039,7 +5138,7 @@ document.addEventListener('visibilitychange', handleVisibilityChange);
 
 // Return cleanup function
 return () => {
-  console.log('Running dashboard cleanup function');
+  Logger.log('Running dashboard cleanup function');
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   stopAutoRefresh();
   if (container._cleanupOverridden) {
@@ -5076,7 +5175,7 @@ function fetchAndDisplayQuestions(sessionId, authToken, sortBy = 'latest', optio
   }
   
   // Build the URL with query parameters
-  let url = `http://localhost:3000/api/sessions/${sessionId}/questions`;
+  let url = `${API_BASE_URL}/api/sessions/${sessionId}/questions`;
   const queryParams = [];
   
   // Add filter parameters
@@ -5106,7 +5205,7 @@ function fetchAndDisplayQuestions(sessionId, authToken, sortBy = 'latest', optio
     url += '?' + queryParams.join('&');
   }
   
-  console.log("Fetching questions from:", url);
+  Logger.log("Fetching questions from:", url);
   
   // Make the API request with error handling
   try {
@@ -5129,7 +5228,7 @@ function fetchAndDisplayQuestions(sessionId, authToken, sortBy = 'latest', optio
       
       // Extract questions with better error handling
       const questions = extractQuestionsFromResponse(response);
-      console.log(`Received ${questions.length} questions for session ${sessionId}`);
+      Logger.log(`Received ${questions.length} questions for session ${sessionId}`);
       
       // Update statistics
       updateQuestionStats(questions);
@@ -5145,7 +5244,7 @@ function fetchAndDisplayQuestions(sessionId, authToken, sortBy = 'latest', optio
     });
   } catch (error) {
     // Handle any unexpected errors
-    console.error("Unexpected error:", error);
+    Logger.error("Unexpected error:", error);
     questionsList.classList.remove('loading');
     renderErrorState(questionsList, "An unexpected error occurred", sessionId, authToken, sortBy, options);
   }
@@ -5154,16 +5253,16 @@ function fetchAndDisplayQuestions(sessionId, authToken, sortBy = 'latest', optio
 // Helper function to safely extract questions from response
 function extractQuestionsFromResponse(response) {
   try {
-    console.log("Raw response structure:", JSON.stringify(response).substring(0, 200) + "...");
+    Logger.log("Raw response structure:", JSON.stringify(response).substring(0, 200) + "...");
     
     if (!response) {
-      console.warn("Empty response received");
+      Logger.warn("Empty response received");
       return [];
     }
     
     // Check for errors
     if (response.error) {
-      console.error("Error in response:", response.error);
+      Logger.error("Error in response:", response.error);
       return [];
     }
     
@@ -5175,19 +5274,19 @@ function extractQuestionsFromResponse(response) {
     }
     
     if (!data) {
-      console.warn("No data found in response");
+      Logger.warn("No data found in response");
       return [];
     }
     
     // Direct array case
     if (Array.isArray(data)) {
-      console.log(`Found array with ${data.length} items directly in data`);
+      Logger.log(`Found array with ${data.length} items directly in data`);
       return data;
     }
     
     // Array in data.data property
     if (data.data && Array.isArray(data.data)) {
-      console.log(`Found array with ${data.data.length} items in data.data`);
+      Logger.log(`Found array with ${data.data.length} items in data.data`);
       return data.data;
     }
     
@@ -5195,7 +5294,7 @@ function extractQuestionsFromResponse(response) {
     const possibleProps = ['questions', 'items', 'results', 'entities'];
     for (const prop of possibleProps) {
       if (data[prop] && Array.isArray(data[prop])) {
-        console.log(`Found array with ${data[prop].length} items in data.${prop}`);
+        Logger.log(`Found array with ${data[prop].length} items in data.${prop}`);
         return data[prop];
       }
     }
@@ -5203,15 +5302,15 @@ function extractQuestionsFromResponse(response) {
     // Last resort: find any array property
     for (const key in data) {
       if (Array.isArray(data[key])) {
-        console.log(`Found array with ${data[key].length} items in data.${key}`);
+        Logger.log(`Found array with ${data[key].length} items in data.${key}`);
         return data[key];
       }
     }
     
-    console.warn("Could not find any array in response:", data);
+    Logger.warn("Could not find any array in response:", data);
     return [];
   } catch (err) {
-    console.error("Error extracting questions:", err);
+    Logger.error("Error extracting questions:", err);
     return [];
   }
 }
@@ -5236,7 +5335,7 @@ function renderEmptyState(container, search, filter) {
 }
 // Helper function to handle error responses
 function handleErrorResponse(container, response, sessionId, authToken, sortBy, options) {
-  console.error("Error fetching questions:", response);
+  Logger.error("Error fetching questions:", response);
   
   const errorMessage = response?.data?.error || response?.error || "Unknown error";
   
@@ -5608,7 +5707,7 @@ function resolveQuestion(sessionId, questionId, resolved, authToken) {
     // Make the API request
     chrome.runtime.sendMessage({
       type: 'API_REQUEST',
-      url: `http://localhost:3000/api/sessions/${sessionId}/questions/${questionId}/resolve`,
+      url: `${API_BASE_URL}/api/sessions/${sessionId}/questions/${questionId}/resolve`,
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${authToken}`,
@@ -5730,15 +5829,15 @@ function showToast({ message, type = 'info', duration = 3000 }) {
 // At line ~3675
 // In the renderAnonymousComponents function (around line 3720)
 function renderAnonymousComponents() {
-  console.log('Rendering anonymous components');
+  Logger.log('Rendering anonymous components');
 
   // Get active session information with debug details
   chrome.storage.local.get(['activeSession', 'authState'], (result) => {
-    console.log('Active session data:', result.activeSession);
-    console.log('Auth state:', result.authState?.token ? 'Token exists' : 'No token');
+    Logger.log('Active session data:', result.activeSession);
+    Logger.log('Auth state:', result.authState?.token ? 'Token exists' : 'No token');
     
     if (!result.activeSession || !result.authState) {
-      console.error('No active session or auth state found');
+      Logger.error('No active session or auth state found');
       const container = document.getElementById('lynkk-anonymous-content');
       if (container) {
         container.innerHTML = `
@@ -5760,15 +5859,15 @@ function renderAnonymousComponents() {
     let sessionId;
     if (result.activeSession.data && result.activeSession.data.id) {
       sessionId = result.activeSession.data.id;
-      console.log('Found session ID in activeSession.data.id:', sessionId);
+      Logger.log('Found session ID in activeSession.data.id:', sessionId);
     } else if (result.activeSession.id) {
       sessionId = result.activeSession.id;
-      console.log('Found session ID in activeSession.id:', sessionId);
+      Logger.log('Found session ID in activeSession.id:', sessionId);
     } else if (result.activeSession.ok && result.activeSession.data && result.activeSession.data.id) {
       sessionId = result.activeSession.data.id;
-      console.log('Found session ID in activeSession.ok.data.id:', sessionId);
+      Logger.log('Found session ID in activeSession.ok.data.id:', sessionId);
     } else {
-      console.error('Could not extract session ID from:', result.activeSession);
+      Logger.error('Could not extract session ID from:', result.activeSession);
       
       // Show an error message to the user
       const container = document.getElementById('lynkk-anonymous-content');
@@ -5803,7 +5902,7 @@ function renderAnonymousComponents() {
 
     const authToken = result.authState.token;
 
-    console.log(`Session ID: ${sessionId}, Auth token exists: ${!!authToken}`);
+    Logger.log(`Session ID: ${sessionId}, Auth token exists: ${!!authToken}`);
 
     // Now proceed with the rest of the function
     if (result.authState.user && result.authState.user.role === 'professor') {
@@ -5812,7 +5911,7 @@ function renderAnonymousComponents() {
       if (container) {
         renderProfessorQuestionDashboard(container, sessionId, authToken);
       } else {
-        console.error('Professor questions container not found');
+        Logger.error('Professor questions container not found');
       }
     } else {
       // For students, initialize the anonymous question dashboard
@@ -5828,12 +5927,12 @@ function renderAnonymousComponents() {
     const tabs = document.querySelectorAll('.anon-tab');
     
     if (tabs.length > 0) {
-      console.log('Adding event listeners to anonymous tabs');
+      Logger.log('Adding event listeners to anonymous tabs');
       tabs.forEach(tab => {
         tab.addEventListener('click', function() {
           // Get the tab name
           const tabName = this.getAttribute('data-tab');
-          console.log(`Clicked tab: ${tabName}`);
+          Logger.log(`Clicked tab: ${tabName}`);
           
           // Remove active class from all tabs
           tabs.forEach(t => t.classList.remove('active'));
@@ -5881,7 +5980,7 @@ function renderAnonymousComponents() {
 
   // Cleanup handlers for voice capture
   window.addEventListener('beforeunload', () => {
-    console.log('Page unloading - stopping voice capture');
+    Logger.log('Page unloading - stopping voice capture');
     if (isVoiceCapturing) {
       stopVoiceCapture();
     }
@@ -5889,7 +5988,7 @@ function renderAnonymousComponents() {
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && isVoiceCapturing) {
-      console.log('Page hidden - stopping voice capture');
+      Logger.log('Page hidden - stopping voice capture');
       stopVoiceCapture();
     }
   });
@@ -5900,7 +5999,7 @@ function renderAnonymousComponents() {
 // Update showTab function to include this logic
 function showTab(tabName) {
   // Log tab change
-  console.log(`Switching to tab: ${tabName}`);
+  Logger.log(`Switching to tab: ${tabName}`);
   
   // First hide all tabs
   document.querySelectorAll('.lynkk-content').forEach(content => {
@@ -5931,11 +6030,9 @@ function showTab(tabName) {
     tabElement.classList.add('active');
   }
   
-  // Handle input containers
+  // Handle input containers - AI tab now has built-in input
   const inputContainers = [
-    'lynkk-ai-input-container',
     'lynkk-chat-input-container',
-    'lynkk-anonymous-input-container',
     'lynkk-polls-input-container'
   ];
 
@@ -5946,11 +6043,19 @@ function showTab(tabName) {
     }
   });
   
-  // Show the input container for the selected tab
-  const inputContainer = document.getElementById(`lynkk-${tabName}-input-container`);
-  if (inputContainer) {
-    inputContainer.style.display = 'block';
+  // Show the input container for the selected tab (only chat and polls have separate containers)
+  if (tabName === 'chat') {
+    const chatInputContainer = document.getElementById('lynkk-chat-input-container');
+    if (chatInputContainer) {
+      chatInputContainer.style.display = 'block';
+    }
+  } else if (tabName === 'polls') {
+    const pollsInputContainer = document.getElementById('lynkk-polls-input-container');
+    if (pollsInputContainer) {
+      pollsInputContainer.style.display = 'block';
+    }
   }
+  // AI tab has built-in input, anonymous tab handles its own input
   
   // Save the active tab preference
   chrome.storage.local.set({ activeTab: tabName });
@@ -5965,7 +6070,7 @@ document.addEventListener('keydown', (e) => {
       if (result.activeSession?.id) {
         debugAnonymousQuestions(result.activeSession.id);
       } else {
-        console.log('No active session found for debugging');
+        Logger.log('No active session found for debugging');
       }
     });
   }
@@ -6006,7 +6111,7 @@ function getAnonymousNameDisplay(sessionId) {
 // Update fetchAnonymousIdentity function to properly handle and display identity
 function fetchAnonymousIdentity(sessionId, authToken) {
   return new Promise((resolve, reject) => {
-    console.log(`Fetching anonymous identity for session ${sessionId}...`);
+    Logger.log(`Fetching anonymous identity for session ${sessionId}...`);
     
     // Update UI loading state
     const anonymousNameElement = document.getElementById('lynkk-anonymous-name');
@@ -6017,7 +6122,7 @@ function fetchAnonymousIdentity(sessionId, authToken) {
     // First check for cached identity
     if (window.cachedAnonymousIdentities && window.cachedAnonymousIdentities[sessionId]) {
       const cachedName = window.cachedAnonymousIdentities[sessionId];
-      console.log(`Using cached anonymous identity: ${cachedName}`);
+      Logger.log(`Using cached anonymous identity: ${cachedName}`);
       
       // Update UI with cached name
       if (anonymousNameElement) {
@@ -6041,7 +6146,7 @@ function fetchAnonymousIdentity(sessionId, authToken) {
       const storedName = result[`anonymousIdentity_${sessionId}`];
       
       if (storedName) {
-        console.log(`Using stored anonymous identity: ${storedName}`);
+        Logger.log(`Using stored anonymous identity: ${storedName}`);
         
         // Update UI with stored name
         if (anonymousNameElement) {
@@ -6074,12 +6179,12 @@ function fetchAnonymousIdentity(sessionId, authToken) {
 
 // Helper function to refresh identity in background
 function refreshAnonymousIdentityInBackground(sessionId, authToken, currentName) {
-  console.log(`Refreshing anonymous identity in background for session ${sessionId}...`);
+  Logger.log(`Refreshing anonymous identity in background for session ${sessionId}...`);
   
   // Make API request without blocking the main flow
   chrome.runtime.sendMessage({
     type: 'API_REQUEST',
-    url: `http://localhost:3000/api/anonymous/${sessionId}/identity`,
+    url: `${API_BASE_URL}/api/anonymous/${sessionId}/identity`,
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${authToken}`,
@@ -6088,7 +6193,7 @@ function refreshAnonymousIdentityInBackground(sessionId, authToken, currentName)
   }, (response) => {
     try {
       if (!response || !response.ok) {
-        console.log("Background refresh failed, keeping current identity");
+        Logger.log("Background refresh failed, keeping current identity");
         return;
       }
       
@@ -6102,13 +6207,13 @@ function refreshAnonymousIdentityInBackground(sessionId, authToken, currentName)
       }
       
       if (!anonymousName) {
-        console.log("Invalid response format in background refresh");
+        Logger.log("Invalid response format in background refresh");
         return;
       }
       
       // If identity changed, update cache and UI
       if (anonymousName !== currentName) {
-        console.log(`Identity updated in background from ${currentName} to ${anonymousName}`);
+        Logger.log(`Identity updated in background from ${currentName} to ${anonymousName}`);
         
         // Update memory cache
         if (typeof window.cachedAnonymousIdentities === 'undefined') {
@@ -6125,10 +6230,10 @@ function refreshAnonymousIdentityInBackground(sessionId, authToken, currentName)
           el.textContent = anonymousName;
         });
       } else {
-        console.log("Background refresh confirmed current identity is up-to-date");
+        Logger.log("Background refresh confirmed current identity is up-to-date");
       }
     } catch (error) {
-      console.warn("Error in background identity refresh:", error);
+      Logger.warn("Error in background identity refresh:", error);
     }
   });
 }
@@ -6137,18 +6242,18 @@ function refreshAnonymousIdentityInBackground(sessionId, authToken, currentName)
 function makeIdentityApiRequest(sessionId, authToken, resolve, reject) {
   chrome.runtime.sendMessage({
     type: 'API_REQUEST',
-    url: `http://localhost:3000/api/anonymous/${sessionId}/identity`,
+    url: `${API_BASE_URL}/api/anonymous/${sessionId}/identity`,
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${authToken}`,
       'Content-Type': 'application/json'
     }
   }, (response) => {
-    console.log("Identity API response:", response);
+    Logger.log("Identity API response:", response);
     
     try {
       if (!response || !response.ok) {
-        console.error("Error fetching identity:", response?.error || 'Unknown error');
+        Logger.error("Error fetching identity:", response?.error || 'Unknown error');
         throw new Error("Failed to fetch anonymous identity");
       }
       
@@ -6162,11 +6267,11 @@ function makeIdentityApiRequest(sessionId, authToken, resolve, reject) {
       }
       
       if (!anonymousName) {
-        console.error("Anonymous name not found in response:", response);
+        Logger.error("Anonymous name not found in response:", response);
         throw new Error("Anonymous name not found in response");
       }
       
-      console.log(`Successfully retrieved anonymous identity: ${anonymousName}`);
+      Logger.log(`Successfully retrieved anonymous identity: ${anonymousName}`);
       
       // Update UI
       const anonymousNameElement = document.getElementById('lynkk-anonymous-name');
@@ -6194,7 +6299,7 @@ function makeIdentityApiRequest(sessionId, authToken, resolve, reject) {
         source: 'server'
       });
     } catch (error) {
-      console.error("Error processing identity response:", error);
+      Logger.error("Error processing identity response:", error);
       reject(error);
     }
   });
@@ -6203,12 +6308,12 @@ function makeIdentityApiRequest(sessionId, authToken, resolve, reject) {
 
 function synchronizeAnonymousIdentity(sessionId, authToken) {
   return new Promise((resolve, reject) => {
-    console.log(`Synchronizing anonymous identity for session ${sessionId}`);
+    Logger.log(`Synchronizing anonymous identity for session ${sessionId}`);
     
     // Use cache if available (for immediate response)
     if (window.cachedAnonymousIdentities && window.cachedAnonymousIdentities[sessionId]) {
       const cachedName = window.cachedAnonymousIdentities[sessionId];
-      console.log(`Using cached anonymous identity: ${cachedName}`);
+      Logger.log(`Using cached anonymous identity: ${cachedName}`);
       
       // Immediately resolve with cached data
       resolve({
@@ -6219,7 +6324,7 @@ function synchronizeAnonymousIdentity(sessionId, authToken) {
       // Still try to fetch fresh in background (non-blocking)
       setTimeout(() => {
         fetchAnonymousIdentity(sessionId, authToken)
-          .catch(err => console.warn("Background identity refresh failed:", err));
+          .catch(err => Logger.warn("Background identity refresh failed:", err));
       }, 100);
       
       return;
@@ -6228,18 +6333,18 @@ function synchronizeAnonymousIdentity(sessionId, authToken) {
     // If no cache, try to fetch
     fetchAnonymousIdentity(sessionId, authToken)
       .then(identityData => {
-        console.log(`Successfully synchronized anonymous identity: ${identityData.anonymous_name}`);
+        Logger.log(`Successfully synchronized anonymous identity: ${identityData.anonymous_name}`);
         resolve(identityData);
       })
       .catch(error => {
-        console.error("Failed to synchronize identity:", error);
+        Logger.error("Failed to synchronize identity:", error);
         
         // Try storage as fallback
         chrome.storage.local.get([`anonymousIdentity_${sessionId}`], (result) => {
           const storedName = result[`anonymousIdentity_${sessionId}`];
           
           if (storedName) {
-            console.log(`Using stored anonymous identity as fallback: ${storedName}`);
+            Logger.log(`Using stored anonymous identity as fallback: ${storedName}`);
             
             // Cache it in memory
             if (typeof window.cachedAnonymousIdentities === 'undefined') {
@@ -6254,7 +6359,7 @@ function synchronizeAnonymousIdentity(sessionId, authToken) {
           } else {
             // Generate a temporary name as last resort
             const tempName = generateTemporaryName();
-            console.log(`Generated temporary anonymous name: ${tempName}`);
+            Logger.log(`Generated temporary anonymous name: ${tempName}`);
             
             // Cache it in memory
             if (typeof window.cachedAnonymousIdentities === 'undefined') {
@@ -6300,13 +6405,13 @@ function generateTemporaryName() {
       
       // First synchronize the identity to ensure consistency
       const identity = await synchronizeAnonymousIdentity(sessionId, authToken);
-      console.log(`Submitting question as ${identity.anonymous_name}`);
+      Logger.log(`Submitting question as ${identity.anonymous_name}`);
       
       // Submit question with synchronized identity
       return new Promise((resolve, reject) => {
         chrome.runtime.sendMessage({
           type: 'API_REQUEST',
-          url: `http://localhost:3000/api/anonymous/${sessionId}/questions`,
+          url: `${API_BASE_URL}/api/anonymous/${sessionId}/questions`,
           method: 'POST',
           timeoutMS: 10000, // 10 second timeout
           headers: {
@@ -6319,11 +6424,11 @@ function generateTemporaryName() {
           }
         }, (response) => {
           if (!response || !response.ok) {
-            console.error('Failed to submit question:', response);
+            Logger.error('Failed to submit question:', response);
             return reject(new Error(response?.data?.error || 'Failed to submit question'));
           }
           
-          console.log('Question submitted successfully');
+          Logger.log('Question submitted successfully');
           
           // Update any UI elements as needed
           const questionsList = document.getElementById('lynkk-class-questions');
@@ -6336,7 +6441,7 @@ function generateTemporaryName() {
         });
       });
     } catch (error) {
-      console.error('Error submitting question:', error);
+      Logger.error('Error submitting question:', error);
       throw error;
     } finally {
       // Restore button state
@@ -6421,7 +6526,7 @@ if (!document.getElementById('anonymous-identity-styles')) {
 function renderStudentQuestionHistory(container, sessionId, authToken) {
   if (!container) return;
   
-  console.log("Rendering student question history in container:", container.id);
+  Logger.log("Rendering student question history in container:", container.id);
   
   // Clear previous content and show loading state
   container.innerHTML = `
@@ -6434,14 +6539,14 @@ function renderStudentQuestionHistory(container, sessionId, authToken) {
   // This function uses a different endpoint - critical fix from your original code
   chrome.runtime.sendMessage({
     type: 'API_REQUEST',
-    url: `http://localhost:3000/api/anonymous/${sessionId}/questions`,
+    url: `${API_BASE_URL}/api/anonymous/${sessionId}/questions`,
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${authToken}`,
       'Content-Type': 'application/json'
     }
   }, (response) => {
-    console.log("Student history response:", response);
+    Logger.log("Student history response:", response);
   
     try {
       if (!response || !response.ok) {
@@ -6491,9 +6596,9 @@ function renderStudentQuestionHistory(container, sessionId, authToken) {
       }
   
       // CRITICAL FIX: Log and ensure questions is an array
-      console.log(`Extracted ${questions?.length || 0} questions for history`);
+      Logger.log(`Extracted ${questions?.length || 0} questions for history`);
       if (!Array.isArray(questions)) {
-        console.warn("Questions is not an array, using empty array instead");
+        Logger.warn("Questions is not an array, using empty array instead");
         questions = [];
       }
       
@@ -6608,7 +6713,7 @@ function renderStudentQuestionHistory(container, sessionId, authToken) {
       
       // Set the HTML content
       container.innerHTML = html;
-      console.log("Set question history HTML. Element now has", container.children.length, "children");
+      Logger.log("Set question history HTML. Element now has", container.children.length, "children");
       
       // Add "View Full" button listeners
       const viewFullButtons = container.querySelectorAll('.lynkk-view-full-btn');
@@ -6624,7 +6729,7 @@ function renderStudentQuestionHistory(container, sessionId, authToken) {
       });
       
     } catch (error) {
-      console.error("Error rendering student question history:", error);
+      Logger.error("Error rendering student question history:", error);
       container.innerHTML = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; color: #6b7280;">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -6655,10 +6760,10 @@ function renderStudentQuestionHistory(container, sessionId, authToken) {
 
   // This function initializes the complete anonymous questions dashboard
 function initializeAnonymousQuestionDashboard(sessionId, authToken) {
-  console.log('Initializing anonymous question dashboard for session:', sessionId);
+  Logger.log('Initializing anonymous question dashboard for session:', sessionId);
   
   if (!sessionId || !authToken) {
-    console.error('Missing session ID or auth token for anonymous question dashboard');
+    Logger.error('Missing session ID or auth token for anonymous question dashboard');
     return;
   }
 
@@ -6856,7 +6961,7 @@ function initializeAnonymousQuestionDashboard(sessionId, authToken) {
   // Fetch anonymous identity
   fetchAnonymousIdentity(sessionId, authToken)
     .then(identity => {
-      console.log('Anonymous identity loaded:', identity);
+      Logger.log('Anonymous identity loaded:', identity);
       
       // Load class questions for this session only
       loadClassQuestionsForSession(sessionId, authToken);
@@ -6868,7 +6973,7 @@ function initializeAnonymousQuestionDashboard(sessionId, authToken) {
       setupQuestionForm(sessionId, authToken);
     })
     .catch(error => {
-      console.error('Error loading anonymous identity:', error);
+      Logger.error('Error loading anonymous identity:', error);
       document.getElementById('lynkk-anonymous-name').textContent = 'Error loading identity';
     });
 }
@@ -7145,11 +7250,11 @@ function loadClassQuestionsForSession(sessionId, authToken) {
   let container = document.getElementById('lynkk-class-questions');
   
   if (!container) {
-    console.error('Class questions container not found');
+    Logger.error('Class questions container not found');
     return;
   }
   
-  console.log(`Loading class questions for session ${sessionId}`);
+  Logger.log(`Loading class questions for session ${sessionId}`);
   
   // Show loading indicator
   container.innerHTML = `
@@ -7162,14 +7267,14 @@ function loadClassQuestionsForSession(sessionId, authToken) {
   // Make API request to the correct endpoint
   chrome.runtime.sendMessage({
     type: 'API_REQUEST',
-    url: `http://localhost:3000/api/anonymous/session/${sessionId}`,
+    url: `${API_BASE_URL}/api/anonymous/session/${sessionId}`,
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${authToken}`,
       'Content-Type': 'application/json'
     }
   }, (response) => {
-    console.log("Class questions response:", response);
+    Logger.log("Class questions response:", response);
     
     try {
       // Extract questions from response based on your API response structure
@@ -7178,10 +7283,10 @@ function loadClassQuestionsForSession(sessionId, authToken) {
       // Access nested data structure correctly
       if (response && response.ok && response.data && response.data.data) {
         questions = response.data.data;
-        console.log("Extracted questions array:", questions);
+        Logger.log("Extracted questions array:", questions);
       }
       
-      console.log(`Found ${questions.length} class questions`);
+      Logger.log(`Found ${questions.length} class questions`);
       
       // Handle empty questions
       if (!questions || questions.length === 0) {
@@ -7218,7 +7323,7 @@ function loadClassQuestionsForSession(sessionId, authToken) {
         const displayName = question.display_name || (isAnonymous ? 'Anonymous' : 'Student');
         
         // Log for debugging
-        console.log(`Question: type=${question.type}, display_name=${question.display_name}, showing as=${displayName}`);
+        Logger.log(`Question: type=${question.type}, display_name=${question.display_name}, showing as=${displayName}`);
         
         html += `
           <div class="lynkk-question-card ${resolvedClass}" style="margin-bottom: 10px; padding: 12px; background-color: ${question.resolved ? '#f0fdf4' : '#f8fafc'}; border-radius: 8px; border-left: 3px solid ${question.resolved ? '#10b981' : '#4f46e5'};">
@@ -7240,7 +7345,7 @@ function loadClassQuestionsForSession(sessionId, authToken) {
       container.innerHTML = html;
       
     } catch (error) {
-      console.error('Error loading class questions:', error);
+      Logger.error('Error loading class questions:', error);
       container.innerHTML = `
         <div style="text-align: center; padding: 16px;">
           <p style="color: #ef4444; font-size: 12px;">Error loading questions</p>
@@ -7265,7 +7370,7 @@ function loadStudentQuestionsForSession(sessionId, authToken) {
   const container = document.getElementById('lynkk-student-questions-history-container');
   if (!container) return;
   
-  console.log(`Loading student questions for session: ${sessionId}`);
+  Logger.log(`Loading student questions for session: ${sessionId}`);
   
   // Show an improved loading indicator
   container.innerHTML = `
@@ -7279,7 +7384,7 @@ function loadStudentQuestionsForSession(sessionId, authToken) {
   
   chrome.runtime.sendMessage({
     type: 'API_REQUEST',
-    url: `http://localhost:3000/api/anonymous/${sessionId}/questions`,
+    url: `${API_BASE_URL}/api/anonymous/${sessionId}/questions`,
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${authToken}`,
@@ -7287,7 +7392,7 @@ function loadStudentQuestionsForSession(sessionId, authToken) {
     }
   }, (response) => {
     try {
-      console.log("Student questions response:", response);
+      Logger.log("Student questions response:", response);
       
       let questions = [];
       
@@ -7299,7 +7404,7 @@ function loadStudentQuestionsForSession(sessionId, authToken) {
         }
       }
       
-      console.log(`Extracted ${questions.length} student questions for session ${sessionId}`);
+      Logger.log(`Extracted ${questions.length} student questions for session ${sessionId}`);
       
       // Handle empty case with a more engaging empty state
       if (questions.length === 0) {
@@ -7398,7 +7503,7 @@ function loadStudentQuestionsForSession(sessionId, authToken) {
       
       // Set the HTML content
       container.innerHTML = html;
-      console.log(`Rendered ${sortedQuestions.length} questions for session ${sessionId}`);
+      Logger.log(`Rendered ${sortedQuestions.length} questions for session ${sessionId}`);
       
       // Add hover effects with JavaScript
       const questionCards = container.querySelectorAll('.lynkk-my-question-card');
@@ -7415,7 +7520,7 @@ function loadStudentQuestionsForSession(sessionId, authToken) {
       });
       
     } catch (error) {
-      console.error("Error rendering student questions:", error);
+      Logger.error("Error rendering student questions:", error);
       container.innerHTML = `
         <div style="text-align: center; padding: 24px; background-color: #fef2f2; border-radius: 12px; border: 1px solid #fee2e2;">
           <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin: 0 auto 12px auto; display: block;">
@@ -7475,11 +7580,11 @@ function setupQuestionForm(sessionId, authToken) {
     .then(identity => {
       if (anonymousNameElement && identity && identity.anonymous_name) {
         anonymousNameElement.textContent = identity.anonymous_name;
-        console.log('Displaying anonymous identity:', identity.anonymous_name);
+        Logger.log('Displaying anonymous identity:', identity.anonymous_name);
       }
     })
     .catch(error => {
-      console.error('Error fetching anonymous identity:', error);
+      Logger.error('Error fetching anonymous identity:', error);
     });
   
   // Set initial toggle UI state
@@ -7490,11 +7595,11 @@ function setupQuestionForm(sessionId, authToken) {
   chrome.storage.local.get(['authState'], (result) => {
     const user = result.authState?.user;
     if (!user) {
-      console.error('User data not found in storage');
+      Logger.error('User data not found in storage');
       return;
     }
     
-    console.log('User data loaded:', user);
+    Logger.log('User data loaded:', user);
     
     // IMPORTANT: Store the real name for later use
     const realName = user.firstName && user.lastName ? 
@@ -7502,15 +7607,15 @@ function setupQuestionForm(sessionId, authToken) {
       user.name || user.username || (user.email ? user.email.split('@')[0] : "Your Real Identity");
     
     // Log real identity for debugging
-    console.log('Real identity to use:', realName);
+    Logger.log('Real identity to use:', realName);
     
     // NOW set up the toggle event listener with both identities available
     if (anonymousToggle) {
       anonymousToggle.addEventListener('change', () => {
-        console.log('Toggle changed! New value:', anonymousToggle.checked);
+        Logger.log('Toggle changed! New value:', anonymousToggle.checked);
         
         if (!anonymousNameElement) {
-          console.error('Anonymous name element not found');
+          Logger.error('Anonymous name element not found');
           return;
         }
         
@@ -7520,19 +7625,19 @@ function setupQuestionForm(sessionId, authToken) {
             .then(identity => {
               if (identity && identity.anonymous_name) {
                 anonymousNameElement.textContent = identity.anonymous_name;
-                console.log('Switched to anonymous identity:', identity.anonymous_name);
+                Logger.log('Switched to anonymous identity:', identity.anonymous_name);
                 
                 if (toggleLabel) toggleLabel.textContent = "Ask Anonymously";
                 if (toggleDescription) toggleDescription.textContent = "Your identity will be hidden";
               }
             })
             .catch(error => {
-              console.error('Error fetching anonymous identity:', error);
+              Logger.error('Error fetching anonymous identity:', error);
             });
         } else {
           // When OFF: Show real username
           anonymousNameElement.textContent = realName;
-          console.log('Switched to real identity:', realName);
+          Logger.log('Switched to real identity:', realName);
           
           if (toggleLabel) toggleLabel.textContent = "Ask with Identity";
           if (toggleDescription) toggleDescription.textContent = "Your real name will be visible";
@@ -7579,16 +7684,16 @@ function setupQuestionForm(sessionId, authToken) {
       
       try {
         // Log submission details for debugging
-        console.log('Submitting question with toggle state:', anonymousToggle ? anonymousToggle.checked : 'toggle not found');
+        Logger.log('Submitting question with toggle state:', anonymousToggle ? anonymousToggle.checked : 'toggle not found');
         
         // Use different API calls based on toggle state
         if (!anonymousToggle || anonymousToggle.checked) {
           // Submit anonymously
-          console.log('Submitting as ANONYMOUS user');
+          Logger.log('Submitting as ANONYMOUS user');
           await submitAnonymousQuestion(sessionId, authToken, questionText);
         } else {
           // Submit with real identity
-          console.log('Submitting as REAL user');
+          Logger.log('Submitting as REAL user');
           await submitIdentifiedQuestion(sessionId, authToken, questionText);
         }
         
@@ -7621,7 +7726,7 @@ function setupQuestionForm(sessionId, authToken) {
           if (feedbackElement) feedbackElement.style.display = 'none';
         }, 3000);
       } catch (error) {
-        console.error('Error submitting question:', error);
+        Logger.error('Error submitting question:', error);
         
         // Show error feedback
         if (errorElement) {
@@ -7648,12 +7753,12 @@ async function submitIdentifiedQuestion(sessionId, authToken, questionText) {
       submitButton.innerHTML = '<span class="animate-pulse">Sending...</span>';
     }
     
-    console.log('Submitting identified question for session:', sessionId);
+    Logger.log('Submitting identified question for session:', sessionId);
     
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
         type: 'API_REQUEST',
-        url: `http://localhost:3000/api/anonymous/${sessionId}/identified-questions`,
+        url: `${API_BASE_URL}/api/anonymous/${sessionId}/identified-questions`,
         method: 'POST',
         timeoutMS: 10000, // Add timeout for consistency
         headers: {
@@ -7665,12 +7770,12 @@ async function submitIdentifiedQuestion(sessionId, authToken, questionText) {
           // Note: 'type' parameter is unnecessary as the endpoint already knows it's for identified questions
         }
       }, (response) => {
-        console.log('Identified question API response:', response);
+        Logger.log('Identified question API response:', response);
         
         if (!response || !response.ok) {
           reject(new Error(response?.error || 'Failed to submit question'));
         } else {
-          console.log('Identified question submitted successfully');
+          Logger.log('Identified question submitted successfully');
           
           // Update any UI elements as needed
           const questionsList = document.getElementById('lynkk-class-questions');
@@ -7684,7 +7789,7 @@ async function submitIdentifiedQuestion(sessionId, authToken, questionText) {
       });
     });
   } catch (error) {
-    console.error('Error submitting identified question:', error);
+    Logger.error('Error submitting identified question:', error);
     throw error;
   } finally {
     // Restore button state
@@ -7708,7 +7813,7 @@ function loadRecentQuestionsPreview(sessionId, authToken) {
   // Make API request for recent questions, limit to 3
   chrome.runtime.sendMessage({
     type: 'API_REQUEST',
-    url: `http://localhost:3000/api/anonymous/session/${sessionId}?limit=3`,
+    url: `${API_BASE_URL}/api/anonymous/session/${sessionId}?limit=3`,
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${authToken}`,
@@ -7761,7 +7866,7 @@ function loadRecentQuestionsPreview(sessionId, authToken) {
       container.innerHTML = html;
       
     } catch (error) {
-      console.error("Error rendering question preview:", error);
+      Logger.error("Error rendering question preview:", error);
       container.innerHTML = `<p style="font-size: 11px; color: #6b7280; text-align: center;">Error loading questions</p>`;
     }
   });
@@ -7772,7 +7877,7 @@ function loadClassQuestions(sessionId, authToken, targetContainer) {
   const container = targetContainer || document.getElementById('lynkk-class-questions');
   if (!container) return;
   
-  console.log("Loading class questions in container:", container.id);
+  Logger.log("Loading class questions in container:", container.id);
   
   // Show loading state
   container.innerHTML = `
@@ -7790,14 +7895,14 @@ function loadClassQuestions(sessionId, authToken, targetContainer) {
   // Use the proper endpoint and handle the response correctly
   chrome.runtime.sendMessage({
     type: 'API_REQUEST',
-    url: `http://localhost:3000/api/anonymous/session/${sessionId}`,
+    url: `${API_BASE_URL}/api/anonymous/session/${sessionId}`,
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${authToken}`,
       'Content-Type': 'application/json'
     }
   }, (response) => {
-    console.log("Class questions response:", response);
+    Logger.log("Class questions response:", response);
     
     try {
       // Extract questions safely from response with multiple fallbacks
@@ -7814,12 +7919,12 @@ function loadClassQuestions(sessionId, authToken, targetContainer) {
       }
       
       // Debug the actual data structure
-      console.log("Extracted questions array:", questions);
-      console.log("First question:", questions.length > 0 ? questions[0] : "No questions");
+      Logger.log("Extracted questions array:", questions);
+      Logger.log("First question:", questions.length > 0 ? questions[0] : "No questions");
       
       // Ensure we have an array
       if (!Array.isArray(questions)) {
-        console.warn("Questions is not an array, using empty array instead");
+        Logger.warn("Questions is not an array, using empty array instead");
         questions = [];
       }
       
@@ -7867,7 +7972,7 @@ function loadClassQuestions(sessionId, authToken, targetContainer) {
         // If display_name is not available, fall back to sensible defaults
         const displayName = question.display_name || (isAnonymous ? 'Anonymous' : 'Student');
         
-        console.log(`Question ${index}: type=${question.type}, anonymous_name=${question.anonymous_name}, display_name=${question.display_name}, final display=${displayName}`);
+        Logger.log(`Question ${index}: type=${question.type}, anonymous_name=${question.anonymous_name}, display_name=${question.display_name}, final display=${displayName}`);
         
         // Visual indicators for different question types
         const badgeHtml = isAnonymous 
@@ -7918,7 +8023,7 @@ function loadClassQuestions(sessionId, authToken, targetContainer) {
       
       // Set the HTML content
       container.innerHTML = html;
-      console.log("Set class questions HTML. Element now has", container.children.length, "children");
+      Logger.log("Set class questions HTML. Element now has", container.children.length, "children");
       
       // Add "View all" button listener
       const viewAllButton = document.getElementById('lynkk-view-all-questions');
@@ -7933,7 +8038,7 @@ function loadClassQuestions(sessionId, authToken, targetContainer) {
       }
       
     } catch (error) {
-      console.error('Error handling response:', error);
+      Logger.error('Error handling response:', error);
       container.innerHTML = `
         <div style="text-align: center; padding: 12px;">
           <p style="font-size: 11px; color: #6b7280;">Error loading questions</p>
@@ -7980,148 +8085,629 @@ function getTimeAgoString(date) {
 
 
 
-// ==================== AI ASSISTANT FUNCTIONS ====================
-/**
- * Shows the selected tab and appropriate input container
- * @param {string} tabName - The name of the tab to show
- */
+// ==================== SESSION DETECTION & AI ROUTING ====================
 
-// Fix visibility for the anonymous tab
-function showTab(tabName) {
-    // Log tab change
-    console.log(`Switching to tab: ${tabName}`);
-    
-    // First hide all tabs with CSS (both active class and inline style)
-    document.querySelectorAll('.lynkk-content').forEach(content => {
-      content.classList.remove('active');
-      content.style.display = 'none'; // Force hide with inline style too
-    });
-    
-    // Remove active class from tab buttons
-    document.querySelectorAll('.lynkk-tab').forEach(tab => {
-      tab.classList.remove('active');
-    });
-    
-    // Get the content for the selected tab
-    const contentElement = document.getElementById(`lynkk-${tabName}-content`);
-    if (contentElement) {
-      contentElement.classList.add('active');
-      
-      // Use the appropriate display type for each tab
-      if (tabName === 'anonymous') {
-        console.log("Setting display: flex for anonymous tab");
-        contentElement.style.display = 'flex';
-        
-        // Force a refresh of anonymous components if we're showing that tab
-        renderAnonymousComponents();
-      } else {
-        contentElement.style.display = 'block';
-      }
-      
-      // Special handling for AI tab
-      if (tabName === 'ai') {
-        const aiMessagesContainer = document.getElementById('lynkk-ai-messages');
-        if (aiMessagesContainer) {
-          setTimeout(() => {
-            aiMessagesContainer.scrollTop = aiMessagesContainer.scrollHeight;
-          }, 10);
-        }
-      }
-    }
-    
-    // Add active class to the selected tab button
-    const tabElement = document.getElementById(`lynkk-${tabName}-tab`);
-    if (tabElement) {
-      tabElement.classList.add('active');
-    }
-    
-    // Handle input containers
-    const inputContainers = [
-      'lynkk-ai-input-container',
-      'lynkk-chat-input-container',
-      'lynkk-anonymous-input-container',
-      'lynkk-polls-input-container'
-    ];
+/**
+ * Get current active session information
+ * @returns {Object|null} Session object or null if no active session
+ */
+function getCurrentSession() {
+  // Check if we have currentSessionId and currentUser (both needed for context-aware AI)
+  Logger.log('🔍 Session Detection Check:', {
+    hasCurrentSessionId: !!currentSessionId,
+    currentSessionId: currentSessionId,
+    hasCurrentUser: !!currentUser,
+    currentUser: currentUser?.username || 'Not logged in',
+    userRole: currentUser?.role || 'No role'
+  });
   
-    inputContainers.forEach(containerId => {
-      const container = document.getElementById(containerId);
-      if (container) {
-        container.style.display = 'none';
-      }
-    });
-    
-    // Show the input container for the selected tab
-    const inputContainer = document.getElementById(`lynkk-${tabName}-input-container`);
-    if (inputContainer) {
-      inputContainer.style.display = 'block';
-    }
-    
-    // Save the active tab preference
-    chrome.storage.local.set({ activeTab: tabName });
+  if (currentSessionId && currentUser) {
+    const session = {
+      id: currentSessionId,
+      user: currentUser
+    };
+    Logger.log('✅ Active session found for', currentUser.role === 'student' ? 'STUDENT' : 'PROFESSOR', ':', session);
+    return session;
   }
-
+  
+  Logger.log('❌ No active session (missing sessionId or user)');
+  return null;
+}
 
 /**
- * Initialize Gemini context with session information
- * @param {Object} session - The session object
+ * Smart AI message routing - chooses appropriate AI based on session status
+ * @param {string} question - The user's question (optional, reads from input if not provided)
  */
-function initGeminiContext(session) {
-  console.log('Initializing Gemini context with session:', session);
-
-  // Handle different response structures for professor vs student
-  let sessionData;
-  if (session.data) {
-    // Professor response structure
-    sessionData = session.data;
+async function sendSmartAIMessage(question = null) {
+  const activeSession = getCurrentSession();
+  
+  Logger.log('🤖 Smart AI Routing:', {
+    hasActiveSession: !!activeSession,
+    sessionId: activeSession?.id,
+    user: activeSession?.user?.username || 'Not logged in'
+  });
+  
+  if (activeSession && activeSession.id) {
+    // User is in a session - use context-aware AI
+    Logger.log('🎓 Using Context-Aware AI (Session Context)');
+    await sendContextAwareAIMessage(question);
   } else {
-    // Student response structure
-    sessionData = session;
+    // User is not in a session - use generic AI
+    Logger.log('💡 Using Generic AI (No Session Context)');
+    await sendGenericAIMessage(question);
   }
+}
 
-  // Set context values
-  geminiContext.sessionTitle = sessionData.title || 'Untitled Session';
-  geminiContext.sessionDescription = sessionData.description || '';
-  geminiContext.sessionId = sessionData.id;
-  geminiContext.messages = [];
-
-  // Get the welcome message element
-  const welcomeMsg = document.getElementById('lynkk-ai-messages');
+/**
+ * Generic AI for users outside of sessions
+ * @param {string} question - The user's question (optional, reads from input if not provided)
+ */
+async function sendGenericAIMessage(question = null) {
+  // Get input elements - works for both dashboard and standalone interfaces
+  let aiInput = document.getElementById('lynkk-ai-input');
+  let aiSendBtn = document.getElementById('lynkk-ai-send');
+  let aiMessages = document.getElementById('lynkk-ai-messages');
   
-  // Only set welcome message if we're in a session context and have a title
-  if (welcomeMsg && geminiContext.sessionTitle) {
-    welcomeMsg.innerHTML = `
-      <div class="lynkk-welcome-message">
-        <p>Your question about <strong>${geminiContext.sessionTitle}</strong>:</p>
-        ${geminiContext.sessionDescription ? 
-          `<p class="lynkk-session-desc">${geminiContext.sessionDescription}</p>` 
-          : ''}
-      </div>
-    `;
-
-    // Add styles for session description
-    if (!document.querySelector('.lynkk-session-desc-style')) {
-      const style = document.createElement('style');
-      style.className = 'lynkk-session-desc-style';
-      style.textContent = `
-        .lynkk-session-desc {
-          font-size: 12px;
-          color: #94a3b8;
-          margin-top: 6px;
-          font-style: italic;
-        }
-      `;
-      document.head.appendChild(style);
+  // If not found, might be in standalone interface
+  if (!aiInput) {
+    aiInput = document.querySelector('textarea[placeholder*="AskLynk"]');
+    aiSendBtn = document.querySelector('button[id*="send"]');
+    aiMessages = document.querySelector('div[id*="messages"]');
+  }
+  
+  const messageText = question || (aiInput ? aiInput.value.trim() : '');
+  if (!messageText) return;
+  
+  // Clear input if we have one
+  if (aiInput) {
+    aiInput.value = '';
+    aiInput.style.height = 'auto';
+  }
+  
+  // Disable send button if we have one
+  if (aiSendBtn) {
+    aiSendBtn.disabled = true;
+    aiSendBtn.style.background = '#d1d5db';
+  }
+  
+  // Remove welcome message if it exists
+  if (aiMessages) {
+    const welcomeMsg = aiMessages.querySelector('[data-welcome]');
+    if (welcomeMsg) {
+      welcomeMsg.remove();
+    }
+  }
+  
+  // Add user message
+  const userMessageId = addGenericAIMessage(messageText, true);
+  
+  // Add AI message with streaming
+  const aiMessageId = addGenericAIMessage('', false, true);
+  
+  try {
+    await streamGenericAIResponse(messageText, aiMessageId);
+  } catch (error) {
+    Logger.error('❌ Generic AI Request failed:', error);
+    updateGenericAIMessage(aiMessageId, "I'm sorry, I encountered an error. Please try again.", true);
+  } finally {
+    // Re-enable send button
+    if (aiSendBtn) {
+      aiSendBtn.disabled = false;
+      aiSendBtn.style.background = '#19c37d';
     }
   }
 }
 
+// ==================== AI ASSISTANT FUNCTIONS ====================
+
+/**
+ * Stream generic AI response with real-time updates
+ * @param {string} question - The user's question
+ * @param {string} messageId - The message ID to update
+ */
+async function streamGenericAIResponse(question, messageId) {
+  try {
+    // Get auth token if user is logged in (optional for generic AI)
+    let userToken = null;
+    if (currentUser) {
+      const authResult = await new Promise((resolve) => {
+        chrome.storage.local.get(['authState'], (result) => {
+          resolve(result.authState?.token || null);
+        });
+      });
+      userToken = authResult;
+    }
+    
+    Logger.log('🚀 Sending Generic AI request:', {
+      endpoint: `${API_BASE_URL}/api/ai/general/ask-stream`,
+      question: question,
+      authenticated: !!userToken
+    });
+    
+    // Make API request to generic AI backend with SSE
+    const response = await fetch(`${API_BASE_URL}/api/ai/general/ask-stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+        ...(userToken && { 'Authorization': `Bearer ${userToken}` })
+      },
+      body: JSON.stringify({ question })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    // Handle Server-Sent Events stream
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let aiResponse = '';
+    let hasError = false; // Track if we've encountered an error
+    
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              break;
+            }
+            
+            try {
+              const parsed = JSON.parse(data);
+              Logger.log('📨 Parsed Generic AI SSE data:', parsed);
+              
+              // Handle error responses from backend
+              if (parsed.type === 'error' && parsed.error) {
+                Logger.error('❌ Generic AI Backend error received:', parsed.error);
+                const errorMessage = `❌ ${parsed.error}`;
+                updateGenericAIMessage(messageId, errorMessage, true);
+                hasError = true; // Mark that we've handled an error
+                return; // Stop processing further
+              }
+              
+              if (parsed.type === 'chunk' && parsed.content) {
+                aiResponse += parsed.content;
+                Logger.log('✅ Adding chunk content:', parsed.content, 'Total response:', aiResponse.length, 'chars');
+                updateGenericAIMessage(messageId, aiResponse, false);
+              } else if (parsed.content) {
+                aiResponse += parsed.content;
+                Logger.log('✅ Adding direct content:', parsed.content, 'Total response:', aiResponse.length, 'chars');
+                updateGenericAIMessage(messageId, aiResponse, false);
+              } else {
+                Logger.warn('⚠️ No content found in parsed data:', parsed);
+              }
+            } catch (parseError) {
+              Logger.warn('❌ Failed to parse Generic AI SSE data:', data, 'Error:', parseError.message);
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    
+    // Only proceed with normal completion if we didn't encounter an error
+    if (!hasError) {
+      Logger.log('✅ Generic AI Response received via SSE');
+      
+      // Final update to mark as complete
+      updateGenericAIMessage(messageId, aiResponse, true);
+    }
+    
+  } catch (error) {
+    Logger.error('❌ Generic AI Request failed:', error);
+    
+    let errorMessage = "I'm sorry, I encountered an error while processing your request. Please try again.";
+    
+    if (error.message.includes('429')) {
+      errorMessage = "I'm currently experiencing high demand. Please wait a moment and try again.";
+    } else if (error.message.includes('401')) {
+      errorMessage = "There was an authentication issue. The response might be limited.";
+    } else if (error.message.includes('network') || error.message.includes('fetch')) {
+      errorMessage = "Connection issue. Please check your internet connection and try again.";
+    }
+    
+    updateGenericAIMessage(messageId, errorMessage, true);
+  }
+}
+
+/**
+ * Add message to generic AI UI
+ * @param {string} content - Message content
+ * @param {boolean} isUser - Whether this is a user message
+ * @param {boolean} isStreaming - Whether this is a streaming message
+ * @returns {string} Message ID
+ */
+function addGenericAIMessage(content, isUser, isStreaming = false) {
+  const messageId = 'gen-msg-' + Date.now();
+  Logger.log('🆕 Creating new Generic AI message:', messageId, 'isUser:', isUser, 'content:', content);
+  const messageEl = document.createElement('div');
+  messageEl.id = messageId;
+  
+  const aiMessages = document.getElementById('lynkk-ai-messages');
+  Logger.log('📦 AI messages container found:', !!aiMessages);
+  
+  if (isUser) {
+    messageEl.innerHTML = `
+      <div style="padding: 16px 20px; border-bottom: 1px solid #f0f0f0;">
+        <div style="max-width: 768px; margin: 0 auto; display: flex; gap: 12px;">
+          <div style="width: 30px; height: 30px; background: #19c37d; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: white; flex-shrink: 0;">
+            You
+          </div>
+          <div style="flex: 1; color: #202123; font-size: 14px; line-height: 1.5; padding-top: 4px;">
+            ${content}
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    messageEl.innerHTML = `
+      <div style="padding: 16px 20px; background: #f7f7f8; border-bottom: 1px solid #f0f0f0;">
+        <div style="max-width: 768px; margin: 0 auto; display: flex; gap: 12px;">
+          <div style="width: 30px; height: 30px; background: #202123; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: white; flex-shrink: 0;">
+            AI
+          </div>
+          <div style="flex: 1;">
+            <div id="gen-content-${messageId}" style="color: #202123; font-size: 14px; line-height: 1.5; padding-top: 4px;">
+              ${content || 'Thinking...'}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    Logger.log('🎯 Created Generic AI message element with content ID:', `gen-content-${messageId}`);
+  }
+  
+  if (aiMessages) {
+    aiMessages.appendChild(messageEl);
+    aiMessages.scrollTop = aiMessages.scrollHeight;
+    Logger.log('✅ Message element added to DOM');
+  }
+  
+  return messageId;
+}
+
+/**
+ * Update generic AI message content
+ * @param {string} messageId - Message ID to update
+ * @param {string} content - New content
+ * @param {boolean} isComplete - Whether the message is complete
+ */
+function updateGenericAIMessage(messageId, content, isComplete = true) {
+  Logger.log('📝 Updating Generic AI message:', messageId, 'Content length:', content.length, 'Complete:', isComplete);
+  const contentEl = document.getElementById(`gen-content-${messageId}`);
+  if (contentEl) {
+    const formattedContent = formatAIContent(content);
+    contentEl.innerHTML = formattedContent;
+    
+    const aiMessages = document.getElementById('lynkk-ai-messages');
+    if (aiMessages) {
+      aiMessages.scrollTop = aiMessages.scrollHeight;
+    }
+    Logger.log('✅ Generic AI UI updated successfully');
+  } else {
+    Logger.warn('⚠️ Could not find content element:', `gen-content-${messageId}`);
+  }
+}
+
+// Keep track of conversation for context-aware AI
+const contextAwareConversation = [];
+
+// Send context-aware AI message function with real streaming
+async function sendContextAwareAIMessage(question = null) {
+  const aiInput = document.getElementById('lynkk-ai-input');
+  const messageText = question || (aiInput ? aiInput.value.trim() : '');
+  if (!messageText) return;
+  
+  // Clear input
+  aiInput.value = '';
+  aiInput.style.height = 'auto';
+  const aiSendBtn = document.getElementById('lynkk-ai-send');
+  aiSendBtn.disabled = true;
+  aiSendBtn.style.background = '#d1d5db';
+  
+  const aiMessages = document.getElementById('lynkk-ai-messages');
+  
+  // Remove welcome message if it exists
+  const welcomeMsg = aiMessages.querySelector('[data-welcome]');
+  if (welcomeMsg) {
+    welcomeMsg.remove();
+  }
+  
+  // Add user message
+  addContextAwareAIMessage(messageText, true);
+  
+  // Add to conversation history
+  contextAwareConversation.push({
+    role: 'user',
+    content: messageText
+  });
+  
+  // Add AI message with streaming
+  const aiMessageId = addContextAwareAIMessage('', false, true);
+  
+  try {
+    await streamContextAwareAIResponse(messageText, aiMessageId);
+  } catch (error) {
+    Logger.error('❌ Context-Aware AI Request failed:', error);
+    updateContextAwareAIMessage(aiMessageId, "I'm sorry, I encountered an error. Please try again.", false);
+  }
+}
+
+// Add message to context-aware AI UI
+function addContextAwareAIMessage(content, isUser, isStreaming = false) {
+  const messageId = 'ctx-msg-' + Date.now();
+  Logger.log('🆕 Creating new AI message:', messageId, 'isUser:', isUser, 'content:', content);
+  const messageEl = document.createElement('div');
+  messageEl.id = messageId;
+  
+  const aiMessages = document.getElementById('lynkk-ai-messages');
+  Logger.log('📦 AI messages container found:', !!aiMessages);
+  
+  if (isUser) {
+    messageEl.innerHTML = `
+      <div style="padding: 16px 20px; border-bottom: 1px solid #f0f0f0;">
+        <div style="max-width: 768px; margin: 0 auto; display: flex; gap: 12px;">
+          <div style="width: 30px; height: 30px; background: #19c37d; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: white; flex-shrink: 0;">
+            You
+          </div>
+          <div style="flex: 1; color: #202123; font-size: 14px; line-height: 1.5; padding-top: 4px;">
+            ${content}
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    messageEl.innerHTML = `
+      <div style="padding: 16px 20px; background: #f7f7f8; border-bottom: 1px solid #f0f0f0;">
+        <div style="max-width: 768px; margin: 0 auto; display: flex; gap: 12px;">
+          <div style="width: 30px; height: 30px; background: #202123; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: white; flex-shrink: 0;">
+            🎓
+          </div>
+          <div style="flex: 1;">
+            <div id="ctx-content-${messageId}" style="color: #202123; font-size: 14px; line-height: 1.5; padding-top: 4px;">
+              ${content || 'Thinking...'}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    Logger.log('🎯 Created AI message element with content ID:', `ctx-content-${messageId}`);
+  }
+  
+  aiMessages.appendChild(messageEl);
+  aiMessages.scrollTop = aiMessages.scrollHeight;
+  Logger.log('✅ Message element added to DOM');
+  
+  return messageId;
+}
+
+// Format AI content with proper line breaks and markdown-like styling  
+function formatAIContent(content) {
+  if (!content) return '';
+  
+  return content
+    .replace(/\n\n/g, '<br><br>')  // Convert double line breaks to paragraph breaks
+    .replace(/\n/g, '<br>')        // Convert single line breaks to <br>
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')  // Bold formatting
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')  // Italic formatting
+    .trim();
+}
+
+// Update context-aware AI message content
+function updateContextAwareAIMessage(messageId, content, isComplete = true) {
+  Logger.log('📝 Updating AI message:', messageId, 'Content length:', content.length, 'Complete:', isComplete);
+  const contentEl = document.getElementById(`ctx-content-${messageId}`);
+  if (contentEl) {
+    const formattedContent = formatAIContent(content);
+    contentEl.innerHTML = formattedContent;
+    
+    const aiMessages = document.getElementById('lynkk-ai-messages');
+    aiMessages.scrollTop = aiMessages.scrollHeight;
+    Logger.log('✅ UI updated successfully');
+  } else {
+    Logger.warn('⚠️ Could not find content element:', `ctx-content-${messageId}`);
+  }
+}
+
+// Stream context-aware AI response with real word-by-word streaming
+async function streamContextAwareAIResponse(question, messageId) {
+  try {
+    // Get auth token
+    let userToken = null;
+    if (currentUser) {
+      const authResult = await new Promise((resolve) => {
+        chrome.storage.local.get(['authState'], (result) => {
+          resolve(result.authState?.token || null);
+        });
+      });
+      userToken = authResult;
+    }
+    
+    // Determine which endpoint to use based on session and authentication status
+    let endpoint, requestBody;
+    
+    // Log current state for debugging
+    Logger.log('🔍 Context-Aware AI Routing Decision for:', {
+      userRole: currentUser?.role || 'unknown',
+      username: currentUser?.username || 'unknown',
+      hasSessionId: !!currentSessionId,
+      sessionId: currentSessionId,
+      hasToken: !!userToken
+    });
+    
+    if (currentSessionId && userToken) {
+      // Use context-aware AI for session users (with session context)
+      endpoint = `${API_BASE_URL}/api/enhanced/sessions/${currentSessionId}/ask-stream`;
+      requestBody = { question };
+      Logger.log(`✅ ROUTING ${currentUser?.role?.toUpperCase() || 'USER'} TO PERSONALIZED ENDPOINT:`, {
+        role: currentUser?.role,
+        sessionId: currentSessionId,
+        hasToken: !!userToken,
+        endpoint: endpoint
+      });
+    } else {
+      // Use general AI for standalone users (no session context)
+      endpoint = '${API_BASE_URL}/api/ai/general/ask-stream';
+      requestBody = { question };
+      Logger.log(`🔄 ROUTING ${currentUser?.role?.toUpperCase() || 'USER'} TO GENERIC ENDPOINT:`, {
+        role: currentUser?.role,
+        reason: !currentSessionId ? 'No session' : 'No token',
+        sessionId: currentSessionId,
+        hasToken: !!userToken,
+        endpoint: endpoint
+      });
+    }
+    
+    Logger.log('🚀 Sending AI request to:', {
+      endpoint: endpoint,
+      question: question,
+      sessionId: currentSessionId,
+      hasToken: !!userToken,
+      user: currentUser?.username || 'Unknown'
+    });
+    
+    // Make API request with dynamic endpoint
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+        ...(userToken && { 'Authorization': `Bearer ${userToken}` })
+      },
+      body: JSON.stringify(requestBody)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    // Handle Server-Sent Events stream
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let aiResponse = '';
+    let hasError = false; // Track if we've encountered an error
+    
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              // Stream finished
+              break;
+            }
+            
+            try {
+              const parsed = JSON.parse(data);
+              Logger.log('📨 Parsed SSE data:', parsed);
+              
+              // Handle error responses from backend
+              if (parsed.type === 'error' && parsed.error) {
+                Logger.error('❌ Backend error received:', parsed.error);
+                const errorMessage = `❌ ${parsed.error}`;
+                updateContextAwareAIMessage(messageId, errorMessage, true);
+                hasError = true; // Mark that we've handled an error
+                return; // Stop processing further
+              }
+              
+              // Handle both the expected structure and the actual backend structure
+              if (parsed.type === 'chunk' && parsed.content) {
+                aiResponse += parsed.content;
+                Logger.log('✅ Adding chunk content:', parsed.content, 'Total response:', aiResponse.length, 'chars');
+                // Update UI with real-time streaming
+                updateContextAwareAIMessage(messageId, aiResponse, false);
+              } else if (parsed.content) {
+                // Fallback for direct content structure
+                aiResponse += parsed.content;
+                Logger.log('✅ Adding direct content:', parsed.content, 'Total response:', aiResponse.length, 'chars');
+                updateContextAwareAIMessage(messageId, aiResponse, false);
+              } else {
+                Logger.warn('⚠️ No content found in parsed data:', parsed);
+              }
+            } catch (parseError) {
+              Logger.warn('❌ Failed to parse SSE data:', data, 'Error:', parseError.message);
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    
+    // Only proceed with normal completion if we didn't encounter an error
+    if (!hasError) {
+      Logger.log('✅ Context-Aware AI Response received via SSE');
+      
+      // Add to conversation history
+      contextAwareConversation.push({
+        role: 'assistant',
+        content: aiResponse
+      });
+      
+      // Final update to mark as complete
+      updateContextAwareAIMessage(messageId, aiResponse, true);
+    }
+    
+  } catch (error) {
+    Logger.error('❌ Context-Aware AI Request failed:', error);
+    
+    let errorMessage = "I'm sorry, I encountered an error while processing your request. Please try again.";
+    
+    if (error.message.includes('429')) {
+      errorMessage = "I'm currently experiencing high demand. Please wait a moment and try again.";
+    } else if (error.message.includes('401') || error.message.includes('log in')) {
+      errorMessage = "Authentication issue. Please try logging in again.";
+    } else if (error.message.includes('session')) {
+      errorMessage = "No active session found. Please join or create a session first.";
+    } else if (error.message.includes('network') || error.message.includes('fetch')) {
+      errorMessage = "Connection issue. Please check your internet connection and try again.";
+    }
+    
+    updateContextAwareAIMessage(messageId, errorMessage, true);
+  }
+}
+
+// Real word-by-word streaming function
+async function streamTextWordByWord(fullText, messageId, updateFunction) {
+  const words = fullText.split(' ');
+  let currentText = '';
+  
+  for (let i = 0; i < words.length; i++) {
+    currentText += (i > 0 ? ' ' : '') + words[i];
+    updateFunction(messageId, currentText, false);
+    
+    // Realistic delay between words (30-100ms)
+    const delay = Math.random() * 70 + 30;
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+  
+  // Final update
+  updateFunction(messageId, fullText, true);
+}
+
+// ==================== OLD AI ASSISTANT FUNCTIONS (TO BE UPDATED) ====================
 /**
  * Makes a request to the Enhanced Backend API with session context
  * @param {string} question - The user's question
  * @returns {Promise<Object>} The AI response from enhanced backend
  */
 async function makeEnhancedBackendRequest(question) {
-  console.log('🚀 Sending request to Enhanced Backend:', {
+  Logger.log('🚀 Sending request to Enhanced Backend:', {
     question: question,
     sessionId: currentSessionId,
     userId: currentUser?.id
@@ -8137,24 +8723,27 @@ async function makeEnhancedBackendRequest(question) {
   }
 
   try {
-    // Get user session token for authentication
-    const userToken = await new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: 'GET_USER_SESSION_TOKEN' }, (response) => {
-        resolve(response?.token);
+    // Get auth token for authentication (not the voice transcript token)
+    const authToken = await new Promise((resolve) => {
+      chrome.storage.local.get(['authState'], (result) => {
+        resolve(result.authState?.token);
       });
     });
 
     // Prepare headers with authentication
     const headers = {
       'Content-Type': 'application/json',
+      'Accept': 'text/event-stream'
     };
 
     // Add authentication header if token is available
-    if (userToken) {
-      headers['Authorization'] = `Bearer ${userToken}`;
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    } else {
+      throw new Error('🔑 No authentication token found. Please log in first.');
     }
 
-    const response = await fetch(`http://localhost:3000/api/enhanced/sessions/${currentSessionId}/ask`, {
+    const response = await fetch(`${API_BASE_URL}/api/enhanced/sessions/${currentSessionId}/ask-stream`, {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
@@ -8186,18 +8775,66 @@ async function makeEnhancedBackendRequest(question) {
       throw new Error(errorMessage);
     }
 
-    const result = await response.json();
+    // Handle Server-Sent Events stream
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullResponse = '';
     
-    if (result.type && result.type !== 'success') {
-      // Handle LLM errors (relevance failed, etc.)
-      throw new Error(result.message || 'AI processing failed');
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              break;
+            }
+            
+            try {
+              const parsed = JSON.parse(data);
+              
+              // Handle error responses from backend
+              if (parsed.type === 'error' && parsed.error) {
+                Logger.error('❌ Enhanced Backend error received:', parsed.error);
+                throw new Error(parsed.error);
+              }
+              
+              if (parsed.content) {
+                fullResponse += parsed.content;
+              }
+            } catch (parseError) {
+              // If it's an error we threw above, re-throw it
+              if (parseError.message.includes('error received')) {
+                throw parseError;
+              }
+              Logger.warn('Failed to parse SSE data:', data);
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
     }
-
-    console.log('✅ Enhanced Backend Response:', result);
-    return result;
+    
+    Logger.log('✅ Enhanced Backend Response via SSE:', fullResponse);
+    
+    // Return in the expected format
+    return {
+      type: 'success',
+      data: {
+        aiResponse: {
+          answer: fullResponse
+        }
+      }
+    };
 
   } catch (error) {
-    console.error('❌ Enhanced Backend Error:', error);
+    Logger.error('❌ Enhanced Backend Error:', error);
     throw error;
   }
 }
@@ -8220,128 +8857,45 @@ function summarizeContext(messages) {
 }
 
 /**
- * Sends an AI question and handles UI updates
+ * Sends an AI question and handles UI updates (Legacy function - redirects to new interface)
  * @param {string} question - The user's question
  */
 async function sendAIQuestion(question) {
-  console.log('🎓 Processing AI question:', question);
+  Logger.log('🎓 Legacy sendAIQuestion called, redirecting to new ChatGPT-style interface:', question);
   
-  // Early validation checks
+  // Check if we're in the new ChatGPT-style interface
   const aiMessages = document.getElementById('lynkk-ai-messages');
   
-  if (!currentSessionId) {
-    const errorMessage = document.createElement('div');
-    errorMessage.className = 'lynkk-ai-message lynkk-ai-error';
-    errorMessage.innerHTML = `
-      <div class="lynkk-ai-avatar">⚠️</div>
-      <div class="lynkk-ai-content">
-        <div class="lynkk-error-text">
-          🚫 No active session found. Please join or create a session first to use the AI Assistant.
-        </div>
-        <div class="lynkk-ai-metadata">
-          <small>Session validation - ${new Date().toLocaleTimeString()}</small>
-        </div>
-      </div>
-    `;
-    aiMessages.appendChild(errorMessage);
-    aiMessages.scrollTop = aiMessages.scrollHeight;
-    return;
-  }
-
-  if (!currentUser) {
-    const errorMessage = document.createElement('div');
-    errorMessage.className = 'lynkk-ai-message lynkk-ai-error';
-    errorMessage.innerHTML = `
-      <div class="lynkk-ai-avatar">🔑</div>
-      <div class="lynkk-ai-content">
-        <div class="lynkk-error-text">
-          Please log in to use the AI Assistant.
-        </div>
-        <div class="lynkk-ai-metadata">
-          <small>Authentication required - ${new Date().toLocaleTimeString()}</small>
-        </div>
-      </div>
-    `;
-    aiMessages.appendChild(errorMessage);
-    aiMessages.scrollTop = aiMessages.scrollHeight;
-    return;
+  // If we're in the context-aware interface, use the new function
+  if (aiMessages && aiMessages.style.display !== 'none') {
+    // Populate the input and trigger the new function
+    const aiInput = document.getElementById('lynkk-ai-input');
+    if (aiInput) {
+      aiInput.value = question;
+      await sendContextAwareAIMessage();
+      return;
+    }
   }
   
-  // Show loading state
-  const loadingMessage = document.createElement('div');
-  loadingMessage.className = 'lynkk-ai-message lynkk-ai-loading';
-  loadingMessage.innerHTML = `
-    <div class="lynkk-ai-avatar">🤖</div>
-    <div class="lynkk-ai-content">
-      <div class="lynkk-loading-dots">Thinking<span>.</span><span>.</span><span>.</span></div>
-    </div>
-  `;
-  aiMessages.appendChild(loadingMessage);
-  aiMessages.scrollTop = aiMessages.scrollHeight;
-
+  // Fallback: Create a minimal display for legacy calls
+  if (!aiMessages) return;
+  
+  // Remove welcome message if it exists
+  const welcomeMsg = aiMessages.querySelector('[data-welcome]');
+  if (welcomeMsg) {
+    welcomeMsg.remove();
+  }
+  
+  // Add user message
+  addContextAwareAIMessage(question, true);
+  
+  // Add AI message with streaming
+  const aiMessageId = addContextAwareAIMessage('', false, true);
+  
   try {
-    // Call enhanced backend instead of Gemini
-    const response = await makeEnhancedBackendRequest(question);
-    
-    // Remove loading message
-    loadingMessage.remove();
-    
-    // Add user question to chat
-    const userMessage = document.createElement('div');
-    userMessage.className = 'lynkk-ai-message lynkk-ai-user';
-    userMessage.innerHTML = `
-      <div class="lynkk-ai-content">${question}</div>
-      <div class="lynkk-ai-avatar">👤</div>
-    `;
-    aiMessages.appendChild(userMessage);
-    
-    // Add AI response to chat
-    const aiMessage = document.createElement('div');
-    aiMessage.className = 'lynkk-ai-message lynkk-ai-assistant';
-    aiMessage.innerHTML = `
-      <div class="lynkk-ai-avatar">🤖</div>
-      <div class="lynkk-ai-content">
-        <div class="lynkk-ai-text">${response.answer}</div>
-        <div class="lynkk-ai-metadata">
-          <small>
-            Relevance: ${(response.relevanceCheck?.score * 100 || 0).toFixed(1)}% | 
-            Confidence: ${(response.confidence * 100 || 0).toFixed(1)}% | 
-            Model: ${response.model || 'Enhanced AI'}
-          </small>
-        </div>
-      </div>
-    `;
-    aiMessages.appendChild(aiMessage);
-    
-    // Scroll to bottom
-    aiMessages.scrollTop = aiMessages.scrollHeight;
-    
-    console.log('✅ AI question processed successfully');
-    
+    await streamContextAwareAIResponse(question, aiMessageId);
   } catch (error) {
-    // Remove loading message
-    loadingMessage.remove();
-    
-    // Show error message
-    const errorMessage = document.createElement('div');
-    errorMessage.className = 'lynkk-ai-message lynkk-ai-error';
-    errorMessage.innerHTML = `
-      <div class="lynkk-ai-avatar">⚠️</div>
-      <div class="lynkk-ai-content">
-        <div class="lynkk-error-text">
-          ${error.message.includes('off-topic') || error.message.includes('relevance') 
-            ? '🎯 ' + error.message 
-            : '❌ Sorry, the AI assistant is temporarily unavailable. Please try again in a moment.'}
-        </div>
-        <div class="lynkk-ai-metadata">
-          <small>Enhanced Backend - ${new Date().toLocaleTimeString()}</small>
-        </div>
-      </div>
-    `;
-    aiMessages.appendChild(errorMessage);
-    aiMessages.scrollTop = aiMessages.scrollHeight;
-    
-    console.error('❌ Error processing AI question:', error);
+    Logger.error('❌ AI Request failed:', error);
   }
 }
 /**
@@ -8362,37 +8916,6 @@ function formatTime(date) {
   });
 }
 
-/**
- * Helper function to show AI messages
- * @param {Object} message - The message to show
- */
-// function showAIMessage(message) {
-//   const aiMessages = document.getElementById('lynkk-ai-messages');
-//   if (!aiMessages) return;
-  
-//   // Remove welcome message if it exists and this is the first message
-//   const welcomeMsg = aiMessages.querySelector('.lynkk-welcome-message');
-//   if (welcomeMsg && message.isUser) {
-//     aiMessages.innerHTML = '';
-//   }
-  
-//   // Create message element
-//   const messageElement = document.createElement('div');
-//   messageElement.className = message.isUser ? 'lynkk-ai-message lynkk-user' : 'lynkk-ai-message lynkk-bot';
-  
-//   messageElement.innerHTML = `
-//     <div class="lynkk-ai-bubble">
-//       <div class="lynkk-ai-header">
-//         <div class="lynkk-ai-sender">${message.isUser ? 'You' : 'AI Assistant'}</div>
-//         <div class="lynkk-ai-time">${formatTime(message.timestamp || new Date())}</div>
-//       </div>
-//       <div class="lynkk-ai-text">${message.content}</div>
-//     </div>
-//   `;
-  
-//   aiMessages.appendChild(messageElement);
-//   aiMessages.scrollTop = aiMessages.scrollHeight;
-// }
 
 // Helper function to show AI messages with beautiful formatting
 function showAIMessage(message) {
@@ -8527,230 +9050,201 @@ function addAIChatStyles() {
   const style = document.createElement('style');
   style.id = 'lynkk-ai-formatting-styles';
   style.textContent = `
-    /* Message containers */
+    /* Google Material Design - Clean AI Assistant */
     .lynkk-ai-message {
       display: flex;
-      flex-direction: column;
+      align-items: flex-start;
       margin-bottom: 16px;
-      max-width: 90%;
-      animation: fadeIn 0.3s ease-out;
+      max-width: 100%;
+      animation: messageSlideIn 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
     }
-    
-    .lynkk-user {
-      align-self: flex-end;
+
+    .lynkk-ai-message.lynkk-user {
+      justify-content: flex-end;
     }
-    
-    .lynkk-bot {
-      align-self: flex-start;
+
+    .lynkk-ai-message.lynkk-assistant {
+      justify-content: flex-start;
     }
-    
-    .lynkk-ai-bubble {
-      border-radius: 12px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-      overflow: hidden;
-    }
-    
-    .lynkk-user .lynkk-ai-bubble {
-      background-color: #4f46e5;
-      color: white;
-      border-bottom-right-radius: 4px;
-    }
-    
-    .lynkk-bot .lynkk-ai-bubble {
-      background-color: white;
-      color: #1f2937;
-      border-bottom-left-radius: 4px;
-      border-left: 3px solid #4f46e5;
-    }
-    
-    /* Error message styling */
-    .lynkk-error .lynkk-ai-bubble {
-      background-color: #fef2f2;
-      color: #b91c1c;
-      border-left: 3px solid #ef4444;
-    }
-    
-    .lynkk-error .lynkk-ai-header {
-      background-color: #fee2e2;
-      color: #b91c1c;
-      border-bottom: 1px solid #fecaca;
-    }
-    
-    .lynkk-error-bubble {
-      border: 1px solid #fecaca !important;
-    }
-    
-    .lynkk-ai-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 12px;
-      font-size: 12px;
-    }
-    
-    .lynkk-user .lynkk-ai-header {
-      background-color: rgba(255, 255, 255, 0.1);
-      color: rgba(255, 255, 255, 0.9);
-    }
-    
-    .lynkk-bot .lynkk-ai-header {
-      background-color: #f9fafb;
-      color: #6b7280;
-      border-bottom: 1px solid #f3f4f6;
-    }
-    
-    .lynkk-ai-sender {
-      font-weight: 600;
+
+    /* Clean Avatar Design */
+    .lynkk-ai-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
       display: flex;
       align-items: center;
-      gap: 6px;
+      justify-content: center;
+      margin-right: 12px;
+      flex-shrink: 0;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-    
-    .lynkk-ai-time {
-      font-size: 10px;
-      opacity: 0.8;
+
+    .lynkk-error-avatar {
+      animation: pulse 2s infinite;
     }
-    
-    .lynkk-ai-text {
+
+    /* Simple Message Bubbles */
+    .lynkk-message-bubble {
+      max-width: 70%;
+      border-radius: 18px;
       padding: 12px 16px;
-      line-height: 1.5;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      position: relative;
+    }
+
+    .lynkk-user-bubble {
+      background: #4285f4;
+      color: white;
+      border-bottom-right-radius: 6px;
+    }
+
+    .lynkk-ai-bubble {
+      background: #f8f9fa;
+      color: #202124;
+      border-bottom-left-radius: 6px;
+      border: 1px solid #e8eaed;
+    }
+
+    .lynkk-error-bubble {
+      background: #fce8e6;
+      color: #d93025;
+      border: 1px solid #fad2cf;
+    }
+
+    .lynkk-loading-bubble {
+      background: #f8f9fa;
+      border: 1px solid #e8eaed;
+      padding: 16px 20px;
+    }
+
+    /* Clean Typography */
+    .lynkk-message-text {
       font-size: 14px;
-      overflow-wrap: break-word;
+      line-height: 1.4;
+      margin: 0;
+      word-wrap: break-word;
     }
-    
-    /* Markdown formatting */
-    .lynkk-ai-formatted {
-      line-height: 1.6;
+
+    .lynkk-user .lynkk-message-text {
+      color: rgba(255,255,255,0.95);
     }
-    
+
+    /* Simple Warning Notice */
+    .lynkk-warning-notice {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: #fff3e0;
+      border: 1px solid #ffcc02;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      font-size: 12px;
+      color: #bf5600;
+    }
+
+    /* Clean Loading Animation */
+    .lynkk-typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .lynkk-typing-indicator span {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #9aa0a6;
+      animation: typing 1.4s infinite ease-in-out;
+    }
+
+    .lynkk-typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+    .lynkk-typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+    .lynkk-typing-indicator span:nth-child(3) { animation-delay: 0s; }
+
+    /* Animations */
+    @keyframes messageSlideIn {
+      from { 
+        opacity: 0; 
+        transform: translateY(8px); 
+      }
+      to { 
+        opacity: 1; 
+        transform: translateY(0); 
+      }
+    }
+
+    @keyframes typing {
+      0%, 80%, 100% { 
+        transform: scale(0.8);
+        opacity: 0.5; 
+      }
+      40% { 
+        transform: scale(1);
+        opacity: 1; 
+      }
+    }
+
+    @keyframes pulse {
+      0%, 100% { 
+        transform: scale(1); 
+      }
+      50% { 
+        transform: scale(1.05); 
+      }
+    }
+
+    /* Markdown Formatting - Minimal */
     .lynkk-ai-formatted p {
-      margin: 0 0 12px 0;
+      margin: 0 0 8px 0;
     }
-    
+
     .lynkk-ai-formatted p:last-child {
       margin-bottom: 0;
     }
-    
-    .lynkk-h1, .lynkk-h2, .lynkk-h3 {
-      margin: 16px 0 12px 0;
+
+    .lynkk-ai-formatted strong {
       font-weight: 600;
-      line-height: 1.3;
+      color: #202124;
     }
-    
-    .lynkk-h1 {
-      font-size: 1.4em;
-      color: #111827;
-    }
-    
-    .lynkk-h2 {
-      font-size: 1.2em;
-      color: #1f2937;
-    }
-    
-    .lynkk-h3 {
-      font-size: 1.1em;
-      color: #374151;
-    }
-    
-    .lynkk-list {
-      margin: 8px 0 16px 0;
-      padding-left: 24px;
-    }
-    
-    .lynkk-list-item {
-      margin-bottom: 4px;
-      position: relative;
-    }
-    
-    .lynkk-link {
-      color: #4f46e5;
-      text-decoration: none;
-      border-bottom: 1px solid rgba(79, 70, 229, 0.3);
-      transition: border-bottom 0.2s;
-    }
-    
-    .lynkk-link:hover {
-      border-bottom: 1px solid rgba(79, 70, 229, 0.8);
-    }
-    
-    /* Code blocks */
-    .lynkk-code-block {
-      background-color: #f9fafb;
-      border-radius: 6px;
-      margin: 12px 0;
-      padding: 12px;
-      overflow-x: auto;
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
-      font-size: 13px;
-      line-height: 1.45;
-      color: #24292e;
-      position: relative;
-      border: 1px solid #e5e7eb;
-    }
-    
-    .lynkk-inline-code {
-      background-color: #f3f4f6;
-      padding: 2px 4px;
-      border-radius: 4px;
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
-      font-size: 0.9em;
-      color: #4f46e5;
-    }
-    
-    /* Animation */
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    
-    /* Syntax highlighting placeholder styles */
-    .hljs-keyword {
-      color: #cf222e;
-    }
-    
-    .hljs-string {
-      color: #0a3069;
-    }
-    
-    .hljs-comment {
-      color: #6e7781;
+
+    .lynkk-ai-formatted em {
       font-style: italic;
-    }
-    
-    .hljs-function {
-      color: #8250df;
-    }
-    
-    .hljs-number {
-      color: #0550ae;
-    }
-    
-    /* Enhanced Backend AI Styles */
-    .lynkk-ai-loading .lynkk-loading-dots span {
-      animation: loading-dots 1.4s infinite ease-in-out;
+      color: #5f6368;
     }
 
-    .lynkk-ai-loading .lynkk-loading-dots span:nth-child(1) { animation-delay: -0.32s; }
-    .lynkk-ai-loading .lynkk-loading-dots span:nth-child(2) { animation-delay: -0.16s; }
-
-    @keyframes loading-dots {
-      0%, 80%, 100% { opacity: 0; }
-      40% { opacity: 1; }
+    .lynkk-ai-formatted code {
+      background: #f1f3f4;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Google Sans Mono', 'Roboto Mono', monospace;
+      font-size: 13px;
+      color: #d93025;
     }
 
-    .lynkk-ai-metadata {
-      margin-top: 8px;
-      opacity: 0.7;
-      font-size: 11px;
+    .lynkk-ai-formatted pre {
+      background: #f8f9fa;
+      border: 1px solid #e8eaed;
+      border-radius: 8px;
+      padding: 12px;
+      margin: 8px 0;
+      overflow-x: auto;
+      font-family: 'Google Sans Mono', 'Roboto Mono', monospace;
+      font-size: 13px;
+      line-height: 1.4;
     }
 
-    .lynkk-ai-error {
-      border-left: 3px solid #ff6b6b;
+    .lynkk-ai-formatted ul, .lynkk-ai-formatted ol {
+      margin: 8px 0 8px 20px;
+      padding: 0;
     }
 
-    .lynkk-ai-error .lynkk-ai-content {
-      background-color: #fff5f5;
+    .lynkk-ai-formatted li {
+      margin-bottom: 4px;
     }
+
+    /* Clean up - remove old styles */
   `;
   document.head.appendChild(style);
 }
@@ -8829,7 +9323,7 @@ async function saveAIConversation(question, response) {
     });
     
     if (!result.activeSession || !result.authState?.token) {
-      console.error('No active session or auth token');
+      Logger.error('No active session or auth token');
       return false;
     }
     
@@ -8840,23 +9334,23 @@ async function saveAIConversation(question, response) {
     } else if (result.activeSession.id) {
       sessionId = result.activeSession.id;
     } else {
-      console.error('Missing sessionId in activeSession:', result.activeSession);
+      Logger.error('Missing sessionId in activeSession:', result.activeSession);
       return false;
     }
     
     // Make sure we have a valid user ID
     if (!result.authState?.user?.id) {
-      console.error('Missing user ID');
+      Logger.error('Missing user ID');
       return false;
     }
     
     const userId = result.authState.user.id;
     const authToken = result.authState.token;
     
-    console.log(`Saving AI conversation with sessionId: ${sessionId} userId: ${userId}`);
+    Logger.log(`Saving AI conversation with sessionId: ${sessionId} userId: ${userId}`);
     
     // First, try to create a new chat directly rather than looking up first
-    console.log('Creating new chat with payload:', {
+    Logger.log('Creating new chat with payload:', {
       user_id: userId,
       session_id: sessionId,
       store_chat: true
@@ -8865,7 +9359,7 @@ async function saveAIConversation(question, response) {
     const newChatResponse = await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
         type: 'API_REQUEST',
-        url: 'http://localhost:3000/api/ai/chats',
+        url: '${API_BASE_URL}/api/ai/chats',
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${authToken}`,
@@ -8885,7 +9379,7 @@ async function saveAIConversation(question, response) {
       });
     });
     
-    console.log('New chat creation response:', newChatResponse);
+    Logger.log('New chat creation response:', newChatResponse);
     
     let chatId;
     
@@ -8896,29 +9390,29 @@ async function saveAIConversation(question, response) {
       } else if (newChatResponse.data && newChatResponse.data.data && newChatResponse.data.data.id) {
         chatId = newChatResponse.data.data.id;
       } else {
-        console.error('Chat ID not found in response:', newChatResponse);
+        Logger.error('Chat ID not found in response:', newChatResponse);
         return false;
       }
-      console.log('Got chat with ID:', chatId);
+      Logger.log('Got chat with ID:', chatId);
     } else {
-      console.error('Failed to create/get chat entry:', 
+      Logger.error('Failed to create/get chat entry:', 
         newChatResponse?.error || 
         (newChatResponse ? 'Status: ' + newChatResponse.status : 'Unknown error'));
       return false;
     }
     
     if (!chatId) {
-      console.error('No valid chatId obtained');
+      Logger.error('No valid chatId obtained');
       return false;
     }
     
-    console.log('Saving messages to chat ID:', chatId);
+    Logger.log('Saving messages to chat ID:', chatId);
     
    // Now save the user's question
    const userMessageResponse = await new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
       type: 'API_REQUEST',
-      url: 'http://localhost:3000/api/ai/messages',
+      url: '${API_BASE_URL}/api/ai/messages',
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${authToken}`,
@@ -8938,10 +9432,10 @@ async function saveAIConversation(question, response) {
     });
   });
   
-  console.log('User message save response:', userMessageResponse);
+  Logger.log('User message save response:', userMessageResponse);
   
   if (!userMessageResponse || !userMessageResponse.ok) {
-    console.error('Failed to save user message:', 
+    Logger.error('Failed to save user message:', 
       userMessageResponse?.error || 
       (userMessageResponse ? 'Status: ' + userMessageResponse.status : 'Unknown error'));
     return false;
@@ -8951,7 +9445,7 @@ async function saveAIConversation(question, response) {
   const aiMessageResponse = await new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
       type: 'API_REQUEST',
-      url: 'http://localhost:3000/api/ai/messages',
+      url: '${API_BASE_URL}/api/ai/messages',
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${authToken}`,
@@ -8971,10 +9465,10 @@ async function saveAIConversation(question, response) {
     });
   });
   
-  console.log('AI message save response:', aiMessageResponse);
+  Logger.log('AI message save response:', aiMessageResponse);
   
   if (!aiMessageResponse || !aiMessageResponse.ok) {
-    console.error('Failed to save AI response:', 
+    Logger.error('Failed to save AI response:', 
       aiMessageResponse?.error || 
       (aiMessageResponse ? 'Status: ' + aiMessageResponse.status : 'Unknown error'));
     return false;
@@ -8985,7 +9479,7 @@ async function saveAIConversation(question, response) {
     await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
         type: 'API_REQUEST',
-        url: 'http://localhost:3000/api/ai/interactions',
+        url: '${API_BASE_URL}/api/ai/interactions',
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${authToken}`,
@@ -8995,7 +9489,7 @@ async function saveAIConversation(question, response) {
           session_id: sessionId,
           question: question,
           answer: response,
-          model_used: 'gemini'
+          model_used: 'enhanced-backend'
         }
       }, result => {
         if (chrome.runtime.lastError) {
@@ -9005,16 +9499,16 @@ async function saveAIConversation(question, response) {
         }
       });
     });
-    console.log('Analytics logged successfully');
+    Logger.log('Analytics logged successfully');
   } catch (analyticsError) {
     // Just log analytics errors but don't fail the whole save
-    console.warn('Failed to log AI interaction:', analyticsError);
+    Logger.warn('Failed to log AI interaction:', analyticsError);
   }
   
-  console.log('AI conversation saved successfully');
+  Logger.log('AI conversation saved successfully');
   return true;
 } catch (error) {
-  console.error('Error saving AI conversation:', error);
+  Logger.error('Error saving AI conversation:', error);
   return false;
 }
 }
@@ -9031,7 +9525,7 @@ try {
   });
   
   if (!result.activeSession || !result.authState?.token) {
-    console.error('No active session or auth token');
+    Logger.error('No active session or auth token');
     return [];
   }
   
@@ -9042,26 +9536,26 @@ try {
   } else if (result.activeSession.id) {
     sessionId = result.activeSession.id;
   } else {
-    console.error('Missing sessionId in activeSession:', result.activeSession);
+    Logger.error('Missing sessionId in activeSession:', result.activeSession);
     return [];
   }
   
   const userId = result.authState.user.id;
   
   if (!sessionId || !userId) {
-    console.error('Missing sessionId or userId');
+    Logger.error('Missing sessionId or userId');
     return [];
   }
   
   const authToken = result.authState.token;
-  console.log(`Loading AI conversations for session ${sessionId}, user ${userId}`);
+  Logger.log(`Loading AI conversations for session ${sessionId}, user ${userId}`);
   
   // Get or create a chat for this session
-  console.log('Getting or creating chat for user and session');
+  Logger.log('Getting or creating chat for user and session');
   const chatResponse = await new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
       type: 'API_REQUEST',
-      url: 'http://localhost:3000/api/ai/chats',
+      url: '${API_BASE_URL}/api/ai/chats',
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${authToken}`,
@@ -9082,7 +9576,7 @@ try {
   });
   
   if (!chatResponse || !chatResponse.ok || !chatResponse.data) {
-    console.log('No chat found or could not be created');
+    Logger.log('No chat found or could not be created');
     return [];
   }
   
@@ -9093,17 +9587,17 @@ try {
   } else if (chatResponse.data.data && chatResponse.data.data.id) {
     chatId = chatResponse.data.data.id;
   } else {
-    console.error('Could not find chat ID in response:', chatResponse);
+    Logger.error('Could not find chat ID in response:', chatResponse);
     return [];
   }
   
-  console.log('Found/created chat with ID:', chatId);
+  Logger.log('Found/created chat with ID:', chatId);
   
   // Fetch messages for this chat
   const messagesResponse = await new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
       type: 'API_REQUEST',
-      url: `http://localhost:3000/api/ai/messages/${chatId}`,
+      url: `${API_BASE_URL}/api/ai/messages/${chatId}`,
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${authToken}`
@@ -9125,30 +9619,30 @@ try {
     } else if (messagesResponse.data && Array.isArray(messagesResponse.data.data)) {
       messages = messagesResponse.data.data;
     } else {
-      console.log('No messages found or unexpected format:', 
+      Logger.log('No messages found or unexpected format:', 
                  typeof messagesResponse.data);
       return [];
     }
   } else {
-    console.error('Failed to fetch messages:', 
+    Logger.error('Failed to fetch messages:', 
                  messagesResponse?.error || 'Unknown error');
     return [];
   }
   
-  console.log(`Loaded ${messages.length} messages from history`);
+  Logger.log(`Loaded ${messages.length} messages from history`);
   
   // Return messages in chronological order
   return messages.sort((a, b) => 
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   );
 } catch (error) {
-  console.error('Error loading previous AI conversations:', error);
+  Logger.error('Error loading previous AI conversations:', error);
   return [];
 }
 }
 
 /**
-* Function to show standalone AI assistant modal
+* Function to show ChatGPT-style AI assistant modal
 */
 function showStandaloneAIAssistant() {
 const dashboardContainer = document.getElementById('lynkk-dashboard-container');
@@ -9157,326 +9651,577 @@ if (!dashboardContainer) return;
 // Store original dashboard content for going back
 const originalContent = dashboardContainer.innerHTML;
 
-// Replace dashboard content with AI assistant UI
+// Replace dashboard content with ChatGPT-style AI assistant UI
 dashboardContainer.innerHTML = `
-  <div style="display: flex; flex-direction: column; height: 100%; background-color: #f8fafc;">
-    <!-- Header with no back button and reduced height -->
-    <div style="background: linear-gradient(90deg, #28a745 0%, #34d058 100%); color: white; padding: 8px 16px; display: flex; justify-content: center; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
-      <div style="display: flex; align-items: center; gap: 10px;">
-        <div style="width: 24px; height: 24px; background-color: rgba(255, 255, 255, 0.2); border-radius: 50%; display: flex; justify-content: center; align-items: center; margin-right: 2px;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><line x1="8.5" y1="8.5" x2="15.5" y2="15.5"></line><line x1="15.5" y1="8.5" x2="8.5" y2="15.5"></line><circle cx="12" cy="8" r="0.5" fill="currentColor"></circle><circle cx="12" cy="16" r="0.5" fill="currentColor"></circle><circle cx="16" cy="12" r="0.5" fill="currentColor"></circle><circle cx="8" cy="12" r="0.5" fill="currentColor"></circle></svg>
-        </div>
-        <div style="font-size: 15px; font-weight: 600;">AI Assistant</div>
-      </div>
+  <div style="display: flex; flex-direction: column; height: 100%; background-color: #ffffff;">
+    <!-- Simple header -->
+    <div style="background: #ffffff; border-bottom: 1px solid #e5e5e5; padding: 16px; display: flex; justify-content: center; align-items: center;">
+      <div style="font-size: 18px; font-weight: 600; color: #202123;">AskLynk AI</div>
     </div>
     
     <!-- Chat messages area -->
-    <div id="lynkk-standalone-messages" style="flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
-      <!-- Motivational quote message -->
-      <div style="background-color: white; border-radius: 10px; padding: 16px; border-left: 4px solid #28a745; max-width: 90%; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
-        <div style="display: flex; align-items: flex-start; gap: 10px;">
-          <div style="color: #28a745; font-size: 24px; line-height: 1;">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/></svg>
-          </div>
-          <div style="flex: 1;">
-            <p id="user-greeting" style="margin: 0 0 6px 0; color: #28a745; line-height: 1.5; font-size: 15px; font-weight: 500;">
-              Hey ,
-            </p>
-            <p id="quote-text" style="margin: 0 0 4px 0; color: #4b5563; line-height: 1.5; font-size: 14px; font-style: italic; font-weight: 400;">
-              "The beautiful thing about learning is that no one can take it away from you."
-            </p>
-            <p id="quote-author" style="margin: 0; color: #6b7280; line-height: 1.5; font-size: 12px; text-align: right; font-weight: 500;">
-              — B.B. King
-            </p>
-          </div>
-        </div>
+    <div id="lynkk-ai-messages" style="flex: 1; overflow-y: auto; padding: 0; display: flex; flex-direction: column;">
+      <!-- Welcome message -->
+      <div style="padding: 32px 20px; text-align: center; color: #6e6e80;">
+        <div style="font-size: 32px; margin-bottom: 16px;">💬</div>
+        <div style="font-size: 20px; font-weight: 600; margin-bottom: 8px; color: #202123;">How can I help you today?</div>
+        <div style="font-size: 14px;">Ask me anything about your studies or coursework</div>
       </div>
     </div>
     
     <!-- Input area -->
-    <div style="padding: 12px; background: white; border-top: 1px solid #e2e8f0; display: flex; gap: 8px;">
-      <input 
-        id="lynkk-standalone-input" 
-        type="text" 
-        placeholder="Ask me anything..." 
-        style="flex: 1; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; transition: border-color 0.2s; outline: none;"
-      />
-      <button 
-        id="lynkk-standalone-send" 
-        style="background-color: #28a745; color: white; border: none; padding: 0 16px; border-radius: 6px; cursor: pointer; font-weight: 500; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center;"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-      </button>
+    <div style="padding: 20px; border-top: 1px solid #e5e5e5; background: #ffffff;">
+      <div style="max-width: 768px; margin: 0 auto; position: relative;">
+        <textarea 
+          id="lynkk-ai-input" 
+          placeholder="Message AskLynk AI..." 
+          style="width: 100%; min-height: 44px; max-height: 120px; padding: 12px 48px 12px 16px; border: 1px solid #d1d5db; border-radius: 12px; font-size: 14px; resize: none; outline: none; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #ffffff;"
+          rows="1"
+        ></textarea>
+        <button 
+          id="lynkk-ai-send" 
+          style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; background: #19c37d; border: none; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background-color 0.2s;"
+          disabled
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: white;">
+            <path d="m22 2-7 20-4-9-9-4Z"/>
+            <path d="M22 2 11 13"/>
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
 `;
 
-// Keep track of conversation in this AI assistant
-const standaloneConversation = [];
+// Keep track of conversation
+const aiConversation = [];
 
-// Array of motivational quotes related to learning and education
-const motivationalQuotes = [
-  { text: "The beautiful thing about learning is that no one can take it away from you.", author: "B.B. King" },
-  { text: "Education is not the filling of a pail, but the lighting of a fire.", author: "W.B. Yeats" },
-  { text: "Live as if you were to die tomorrow. Learn as if you were to live forever.", author: "Mahatma Gandhi" },
-  { text: "The more that you read, the more things you will know. The more that you learn, the more places you'll go.", author: "Dr. Seuss" },
-  { text: "Develop a passion for learning. If you do, you will never cease to grow.", author: "Anthony J. D'Angelo" },
-  { text: "The mind is not a vessel to be filled, but a fire to be kindled.", author: "Plutarch" },
-  { text: "Curiosity is the wick in the candle of learning.", author: "William Arthur Ward" },
-  { text: "The purpose of learning is growth, and our minds, unlike our bodies, can continue growing as we continue to live.", author: "Mortimer Adler" },
-  { text: "I am still learning.", author: "Michelangelo at age 87" },
-  { text: "The expert in anything was once a beginner.", author: "Helen Hayes" },
-  { text: "Never let formal education get in the way of your learning.", author: "Mark Twain" },
-  { text: "Tell me and I forget. Teach me and I remember. Involve me and I learn.", author: "Benjamin Franklin" },
-  { text: "The only person who is educated is the one who has learned how to learn and change.", author: "Carl Rogers" },
-  { text: "Education is not preparation for life; education is life itself.", author: "John Dewey" },
-  { text: "The difference between school and life? In school, you're taught a lesson and then given a test. In life, you're given a test that teaches you a lesson.", author: "Tom Bodett" }
-];
+// Get input elements
+const aiInput = document.getElementById('lynkk-ai-input');
+const aiSendBtn = document.getElementById('lynkk-ai-send');
+const aiMessages = document.getElementById('lynkk-ai-messages');
 
-// Get user's first name from the currentUser variable
-// Safely extract the first name, falling back to a default if not available
-let userFirstName = "Explorer";
-if (typeof currentUser !== 'undefined' && currentUser) {
-  if (currentUser.firstName) {
-    userFirstName = currentUser.firstName;
-  } else if (currentUser.name) {
-    // If only full name is available, extract first name
-    userFirstName = currentUser.name.split(' ')[0];
-  } else if (currentUser.email) {
-    // If only email is available, use part before @ as username
-    userFirstName = currentUser.email.split('@')[0];
-  }
-}
-
-// Select a random quote
-const randomQuote = motivationalQuotes[Math.floor(Math.random() * motivationalQuotes.length)];
-
-// Generate a random greeting style
-const greetings = [
-  `Hey ${userFirstName},`,
-  `Hi ${userFirstName},`,
-  `${userFirstName},`,
-  `Hello ${userFirstName},`,
-  `Dear ${userFirstName},`
-];
-
-const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
-
-// Update greeting and quote in the UI
-document.getElementById('user-greeting').textContent = randomGreeting;
-document.getElementById('quote-text').textContent = `"${randomQuote.text}"`;
-document.getElementById('quote-author').textContent = `— ${randomQuote.author}`;
-
-// Focus input field
-const inputField = document.getElementById('lynkk-standalone-input');
-setTimeout(() => {
-  if (inputField) inputField.focus();
-}, 100);
-
-// Send button event
-document.getElementById('lynkk-standalone-send').addEventListener('click', () => {
-  sendStandaloneMessage();
+// Auto-resize textarea
+aiInput.addEventListener('input', () => {
+  aiInput.style.height = 'auto';
+  aiInput.style.height = Math.min(aiInput.scrollHeight, 120) + 'px';
+  
+  // Enable/disable send button
+  const hasContent = aiInput.value.trim().length > 0;
+  aiSendBtn.disabled = !hasContent;
+  aiSendBtn.style.background = hasContent ? '#19c37d' : '#d1d5db';
+  aiSendBtn.style.cursor = hasContent ? 'pointer' : 'not-allowed';
 });
 
-// Enter key to send
-inputField.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') {
-    sendStandaloneMessage();
+// Send on Enter (but not Shift+Enter)
+aiInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    if (aiInput.value.trim()) {
+      sendAIMessage();
+    }
   }
 });
 
-// Add hover effect for send button
-const sendBtn = document.getElementById('lynkk-standalone-send');
-sendBtn.addEventListener('mouseenter', () => {
-  sendBtn.style.backgroundColor = '#218838';
-  sendBtn.style.transform = 'translateY(-1px)';
+// Send button click
+aiSendBtn.addEventListener('click', () => {
+  if (aiInput.value.trim()) {
+    sendAIMessage();
+  }
 });
 
-sendBtn.addEventListener('mouseleave', () => {
-  sendBtn.style.backgroundColor = '#28a745';
-  sendBtn.style.transform = 'translateY(0)';
-});
+// Focus input
+setTimeout(() => aiInput.focus(), 100);
 
-// Add focus effect for input
-inputField.addEventListener('focus', () => {
-  inputField.style.borderColor = '#28a745';
-});
-
-inputField.addEventListener('blur', () => {
-  inputField.style.borderColor = '#d1d5db';
-});
-
-// Send message function
-function sendStandaloneMessage() {
-  const messageText = inputField.value.trim();
+// Send AI message function with streaming - STANDALONE/GENERIC AI ONLY
+// This function is specifically for the standalone AI assistant and should
+// ALWAYS use the generic endpoint, regardless of user session status
+async function sendAIMessage() {
+  const messageText = aiInput.value.trim();
   if (!messageText) return;
   
   // Clear input
-  inputField.value = '';
+  aiInput.value = '';
+  aiInput.style.height = 'auto';
+  aiSendBtn.disabled = true;
+  aiSendBtn.style.background = '#d1d5db';
   
-  // Add user message to UI
-  addMessageToUI(messageText, true);
+  // Remove welcome message if it exists
+  const welcomeMsg = aiMessages.querySelector('[data-welcome]');
+  if (welcomeMsg) {
+    welcomeMsg.remove();
+  }
+  
+  // Add user message
+  addAIMessage(messageText, true);
   
   // Add to conversation history
-  standaloneConversation.push({
+  aiConversation.push({
     role: 'user',
     content: messageText
   });
   
-  // Show loading indicator
-  const messagesContainer = document.getElementById('lynkk-standalone-messages');
-  const loadingId = 'loading-' + Date.now();
-  const loadingMessage = document.createElement('div');
-  loadingMessage.id = loadingId;
-  loadingMessage.style.backgroundColor = 'white';
-  loadingMessage.style.borderRadius = '10px';
-  loadingMessage.style.padding = '14px';
-  loadingMessage.style.borderLeft = '4px solid #28a745';
-  loadingMessage.style.maxWidth = '90%';
-  loadingMessage.style.boxShadow = '0 2px 5px rgba(0,0,0,0.05)';
-  loadingMessage.style.alignSelf = 'flex-start';
+  // Add AI message with streaming
+  const aiMessageId = addAIMessage('💭 Thinking...', false, true);
   
-  loadingMessage.innerHTML = `
-    <div style="font-weight: 600; color: #28a745; margin-bottom: 6px; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-      <div>AI Assistant</div>
-      <div class="typing-dots" style="display: flex; gap: 4px; align-items: center;">
-        <span style="width: 5px; height: 5px; background-color: #28a745; border-radius: 50%; animation: typing-bounce 1.4s infinite ease-in-out both;"></span>
-        <span style="width: 5px; height: 5px; background-color: #28a745; border-radius: 50%; animation: typing-bounce 1.4s infinite ease-in-out 0.2s both;"></span>
-        <span style="width: 5px; height: 5px; background-color: #28a745; border-radius: 50%; animation: typing-bounce 1.4s infinite ease-in-out 0.4s both;"></span>
+  try {
+    // FIXED: Always use generic AI for standalone assistant, regardless of session status
+    Logger.log('💡 Standalone AI Assistant - Using GENERIC endpoint');
+    await streamStandaloneAIResponse(messageText, aiMessageId);
+  } catch (error) {
+    Logger.error('❌ AI Request failed:', error);
+    updateAIMessage(aiMessageId, "I'm sorry, I encountered an error. Please try again.", false);
+  }
+}
+
+// Add message to UI - simplified
+function addAIMessage(content, isUser, isStreaming = false) {
+  const messageId = 'msg-' + Date.now();
+  const messageEl = document.createElement('div');
+  messageEl.id = messageId;
+  
+  if (isUser) {
+    messageEl.innerHTML = `
+      <div style="padding: 16px 20px; border-bottom: 1px solid #f0f0f0;">
+        <div style="max-width: 768px; margin: 0 auto; display: flex; gap: 12px;">
+          <div style="width: 30px; height: 30px; background: #19c37d; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: white; flex-shrink: 0;">
+            You
+          </div>
+          <div style="flex: 1; color: #202123; font-size: 14px; line-height: 1.5; padding-top: 4px;">
+            ${content}
+          </div>
+        </div>
       </div>
-    </div>
-  `;
-  
-  // Add animation if not already added
-  if (!document.getElementById('typing-animation-style')) {
-    const animStyle = document.createElement('style');
-    animStyle.id = 'typing-animation-style';
-    animStyle.textContent = `
-      @keyframes typing-bounce {
-        0%, 80%, 100% { transform: scale(0.6); }
-        40% { transform: scale(1); }
-      }
     `;
-    document.head.appendChild(animStyle);
+  } else {
+    messageEl.innerHTML = `
+      <div style="padding: 16px 20px; background: #f7f7f8; border-bottom: 1px solid #f0f0f0;">
+        <div style="max-width: 768px; margin: 0 auto; display: flex; gap: 12px;">
+          <div style="width: 30px; height: 30px; background: #202123; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: white; flex-shrink: 0;">
+            AI
+          </div>
+          <div style="flex: 1;">
+            <div id="content-${messageId}" style="color: #202123; font-size: 14px; line-height: 1.5; padding-top: 4px;">
+              ${content || 'Thinking...'}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
   }
   
-  messagesContainer.appendChild(loadingMessage);
-  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  aiMessages.appendChild(messageEl);
+  aiMessages.scrollTop = aiMessages.scrollHeight;
   
-  // Prepare the request payload
-  const payload = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: "You are a helpful AI assistant for teachers and students. You're currently in a general conversation, not tied to any specific class session." }
-        ]
-      },
-      {
-        role: "model",
-        parts: [
-          { text: "I understand my role as a general AI assistant for educational purposes. I'll provide helpful, accurate information for both teachers and students, without assuming any specific class context. How can I help you today?" }
-        ]
-      }
-    ],
-    generationConfig: {
-      temperature: 0.7,
-      topK: 40,
-      topP: 0.95,
-      maxOutputTokens: 800,
-    }
-  };
-  
-  // Add conversation history (up to last 5 messages)
-  const recentMessages = standaloneConversation.slice(-5);
-  recentMessages.forEach(msg => {
-    payload.contents.push({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content }]
-    });
+  return messageId;
+}
+
+// Update AI message content - simplified
+function updateAIMessage(messageId, content, isComplete = true) {
+  Logger.log('🔄 updateAIMessage called:', {
+    messageId,
+    contentLength: content.length,
+    isComplete,
+    firstChars: content.substring(0, 50) + '...'
   });
   
-  // Send to Gemini API
-  chrome.runtime.sendMessage({
-    type: 'GEMINI_API_REQUEST',
-    payload
-  }, result => {
-    // Remove loading indicator
-    const loadingElement = document.getElementById(loadingId);
-    if (loadingElement) loadingElement.remove();
-    
-    if (!result || !result.success) {
-      // Show error message
-      addMessageToUI("I'm sorry, I encountered an error while processing your request. Please try again later.", false);
-      console.error("Error from Gemini API:", result?.error);
-      return;
+  const contentEl = document.getElementById(`content-${messageId}`);
+  if (contentEl) {
+    const formattedContent = formatAIContent(content);
+    contentEl.innerHTML = formattedContent;
+    aiMessages.scrollTop = aiMessages.scrollHeight;
+    Logger.log('✅ DOM updated successfully');
+  } else {
+    Logger.error('❌ Could not find content element:', `content-${messageId}`);
+  }
+}
+
+// Format AI content with markdown-like styling
+function formatAIContent(content) {
+  return content
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`(.*?)`/g, '<code style="background: #f0f0f0; padding: 2px 4px; border-radius: 3px; font-family: monospace; font-size: 13px;">$1</code>')
+    .replace(/\n\n/g, '</p><p style="margin: 8px 0;">')
+    .replace(/\n/g, '<br>')
+    .replace(/^/, '<p style="margin: 0;">')
+    .replace(/$/, '</p>');
+}
+
+// Stream AI response for standalone assistant - ALWAYS uses generic endpoint
+async function streamStandaloneAIResponse(question, messageId) {
+  try {
+    // Get auth token if user is logged in (optional for generic AI)
+    let userToken = null;
+    if (currentUser) {
+      const authResult = await new Promise((resolve) => {
+        chrome.storage.local.get(['authState'], (result) => {
+          resolve(result.authState?.token || null);
+        });
+      });
+      userToken = authResult;
     }
     
-    // Extract response
-    let aiResponse = "I'm sorry, I couldn't generate a response at this time.";
+    Logger.log('🚀 Standalone AI - FORCED to generic endpoint:', {
+      endpoint: '${API_BASE_URL}/api/ai/general/ask-stream',
+      question: question,
+      authenticated: !!userToken,
+      note: 'Standalone AI always uses generic endpoint regardless of session status'
+    });
     
-    if (result.data?.candidates && 
-        result.data.candidates.length > 0 && 
-        result.data.candidates[0].content?.parts?.[0]?.text) {
-      aiResponse = result.data.candidates[0].content.parts[0].text;
-      
+    // ALWAYS use generic AI endpoint for standalone assistant
+    const response = await fetch('${API_BASE_URL}/api/ai/general/ask-stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+        ...(userToken && { 'Authorization': `Bearer ${userToken}` })
+      },
+      body: JSON.stringify({ question })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    // Debug response headers for streaming
+    Logger.log('📡 Standalone AI Response headers:', {
+      'content-type': response.headers.get('content-type'),
+      'cache-control': response.headers.get('cache-control'),
+      'connection': response.headers.get('connection'),
+      'transfer-encoding': response.headers.get('transfer-encoding')
+    });
+    
+    // Verify we have a proper streaming response
+    if (!response.body) {
+      throw new Error('Response body is null - streaming not supported');
+    }
+    
+    Logger.log('🚀 Starting standalone AI streaming...');
+    
+    // Handle Server-Sent Events stream
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let aiResponse = '';
+    let hasError = false; // Track if we've encountered an error
+    
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          Logger.log('📡 Stream reading completed');
+          break;
+        }
+        
+        const chunk = decoder.decode(value, { stream: true });
+        Logger.log('📦 Raw chunk received:', chunk.length, 'bytes:', chunk);
+        const lines = chunk.split('\n');
+        Logger.log('📝 Lines in chunk:', lines.length, lines);
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            Logger.log('📨 SSE data line:', data);
+            if (data === '[DONE]') {
+              Logger.log('✅ Standalone AI stream completed');
+              break;
+            }
+            
+            try {
+              const parsed = JSON.parse(data);
+              Logger.log('📨 Parsed Standalone AI SSE data:', parsed);
+              
+              // Handle error responses from backend
+              if (parsed.type === 'error' && parsed.error) {
+                Logger.error('❌ Standalone AI Backend error received:', parsed.error);
+                const errorMessage = `❌ ${parsed.error}`;
+                updateAIMessage(messageId, errorMessage, true);
+                hasError = true; // Mark that we've handled an error
+                return; // Stop processing further
+              }
+              
+              if (parsed.type === 'chunk' && parsed.content) {
+                aiResponse += parsed.content;
+                Logger.log('✅ Adding chunk content:', parsed.content, 'Total response:', aiResponse.length, 'chars');
+                updateAIMessage(messageId, aiResponse, false);
+                
+                // Force DOM update
+                setTimeout(() => {
+                  const contentEl = document.getElementById(`content-${messageId}`);
+                  if (contentEl) {
+                    Logger.log('🔄 DOM content updated to:', contentEl.innerHTML.length, 'chars');
+                  }
+                }, 0);
+                
+              } else if (parsed.content) {
+                aiResponse += parsed.content;
+                Logger.log('✅ Adding direct content:', parsed.content, 'Total response:', aiResponse.length, 'chars');
+                updateAIMessage(messageId, aiResponse, false);
+              } else {
+                Logger.log('⚠️ No content found in parsed data:', parsed);
+              }
+            } catch (parseError) {
+              Logger.warn('❌ Failed to parse Standalone AI SSE data:', data, 'Error:', parseError.message);
+              // Fallback: treat as plain text if JSON parsing fails
+              if (data.trim()) {
+                aiResponse += data + ' ';
+                updateAIMessage(messageId, aiResponse, false);
+              }
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    
+    // Only proceed with normal completion if we didn't encounter an error
+    if (!hasError) {
       // Add to conversation history
-      standaloneConversation.push({
+      aiConversation.push({
         role: 'assistant',
         content: aiResponse
       });
+      
+      // Mark as complete
+      updateAIMessage(messageId, aiResponse, true);
     }
     
-    // Display response
-    addMessageToUI(aiResponse, false);
-  });
+    // Re-enable send button
+    const aiSendBtn = document.getElementById('lynkk-ai-send');
+    if (aiSendBtn) {
+      aiSendBtn.disabled = false;
+      aiSendBtn.style.background = '#19c37d';
+    }
+    
+  } catch (error) {
+    Logger.error('❌ Standalone AI Request failed:', error);
+    
+    const errorMessage = error.message.includes('Failed to fetch') 
+      ? 'Connection error. Please check your internet connection and try again.'
+      : 'Sorry, I encountered an error. Please try again.';
+    
+    updateAIMessage(messageId, errorMessage, true);
+    
+    // Re-enable send button
+    const aiSendBtn = document.getElementById('lynkk-ai-send');
+    if (aiSendBtn) {
+      aiSendBtn.disabled = false;
+      aiSendBtn.style.background = '#19c37d';
+    }
+  }
 }
 
-// Function to add message to UI
-function addMessageToUI(message, isUser) {
-  const messagesContainer = document.getElementById('lynkk-standalone-messages');
-  const messageEl = document.createElement('div');
-  
-  if (isUser) {
-    messageEl.style.backgroundColor = '#f0f9ff';
-    messageEl.style.borderRadius = '10px';
-    messageEl.style.padding = '14px';
-    messageEl.style.borderRight = '4px solid #4a66dd';
-    messageEl.style.maxWidth = '90%';
-    messageEl.style.alignSelf = 'flex-end';
-    messageEl.style.boxShadow = '0 2px 5px rgba(0,0,0,0.05)';
+// Stream AI response - with real word-by-word streaming
+async function streamAIResponse(question, messageId) {
+  try {
+    // Get auth token if user is logged in
+    let userToken = null;
+    if (currentUser) {
+      const authResult = await new Promise((resolve) => {
+        chrome.storage.local.get(['authState'], (result) => {
+          resolve(result.authState?.token || null);
+        });
+      });
+      userToken = authResult;
+    }
     
-    messageEl.innerHTML = `
-      <div style="font-weight: 600; color: #4a66dd; margin-bottom: 6px; font-size: 14px;">You</div>
-      <p style="margin: 0; color: #334155; line-height: 1.5; font-size: 13px;">${message}</p>
-    `;
-  } else {
-    messageEl.style.backgroundColor = 'white';
-    messageEl.style.borderRadius = '10px';
-    messageEl.style.padding = '14px';
-    messageEl.style.borderLeft = '4px solid #28a745';
-    messageEl.style.maxWidth = '90%';
-    messageEl.style.alignSelf = 'flex-start';
-    messageEl.style.boxShadow = '0 2px 5px rgba(0,0,0,0.05)';
+    // Determine which endpoint to use - EXPLICIT STUDENT/PROFESSOR ROUTING
+    let endpoint, requestBody;
     
-    // Process markdown-like formatting
-    const formattedText = message
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
-      .replace(/\*(.*?)\*/g, '<em>$1</em>') // Italic
-      .replace(/`(.*?)`/g, '<code style="background: #f1f5f9; padding: 2px 4px; border-radius: 4px; font-family: monospace;">$1</code>') // Code
-      .replace(/\n\n/g, '</p><p>') // Paragraphs
-      .replace(/\n/g, '<br>'); // Line breaks
+    // Log current state for debugging
+    Logger.log('🔍 AI Routing Decision for:', {
+      userRole: currentUser?.role || 'unknown',
+      username: currentUser?.username || 'unknown',
+      hasSessionId: !!currentSessionId,
+      sessionId: currentSessionId,
+      hasToken: !!userToken
+    });
     
-    messageEl.innerHTML = `
-      <div style="font-weight: 600; color: #28a745; margin-bottom: 6px; font-size: 14px;">AI Assistant</div>
-      <p style="margin: 0; color: #334155; line-height: 1.5; font-size: 13px;">${formattedText}</p>
-    `;
+    if (currentSessionId && userToken) {
+      // Use context-aware AI for session users (with session context)
+      endpoint = `${API_BASE_URL}/api/enhanced/sessions/${currentSessionId}/ask-stream`;
+      requestBody = { question };
+      Logger.log(`✅ ROUTING ${currentUser?.role?.toUpperCase() || 'USER'} TO PERSONALIZED ENDPOINT:`, {
+        role: currentUser?.role,
+        sessionId: currentSessionId,
+        hasToken: !!userToken,
+        endpoint: endpoint
+      });
+    } else {
+      // Use general AI for standalone users (no session context)
+      endpoint = '${API_BASE_URL}/api/ai/general/ask-stream';
+      requestBody = { question };
+      Logger.log(`🔄 ROUTING ${currentUser?.role?.toUpperCase() || 'USER'} TO GENERIC ENDPOINT:`, {
+        role: currentUser?.role,
+        reason: !currentSessionId ? 'No session' : 'No token',
+        sessionId: currentSessionId,
+        hasToken: !!userToken,
+        endpoint: endpoint
+      });
+    }
+    
+    Logger.log('🚀 Sending AI request to:', endpoint, requestBody);
+    
+    // Handle streaming endpoints differently
+    if (endpoint.includes('ask-stream')) {
+      // Use Server-Sent Events for streaming endpoints
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+          ...(userToken && { 'Authorization': `Bearer ${userToken}` })
+        },
+        body: JSON.stringify(requestBody)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      // Handle Server-Sent Events stream
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let aiResponse = '';
+      let hasError = false; // Track if we've encountered an error
+      
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') {
+                break;
+              }
+              
+              try {
+                const parsed = JSON.parse(data);
+                
+                // Handle error responses from backend
+                if (parsed.type === 'error' && parsed.error) {
+                  Logger.error('❌ Backend error received:', parsed.error);
+                  const errorMessage = `❌ ${parsed.error}`;
+                  updateAIMessage(messageId, errorMessage, true);
+                  hasError = true; // Mark that we've handled an error
+                  return; // Stop processing further
+                }
+                
+                // Handle both the expected structure and the actual backend structure
+                if (parsed.type === 'chunk' && parsed.content) {
+                  aiResponse += parsed.content;
+                  // Update UI with real-time streaming
+                  updateAIMessage(messageId, aiResponse, false);
+                } else if (parsed.content) {
+                  // Fallback for direct content structure
+                  aiResponse += parsed.content;
+                  updateAIMessage(messageId, aiResponse, false);
+                }
+              } catch (parseError) {
+                Logger.warn('Failed to parse SSE data:', data, 'Error:', parseError.message);
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      
+      // Only proceed with normal completion if we didn't encounter an error
+      if (!hasError) {
+        // Add to conversation history
+        aiConversation.push({
+          role: 'assistant',
+          content: aiResponse
+        });
+        
+        // Final update
+        updateAIMessage(messageId, aiResponse, true);
+      }
+      
+    } else {
+      // Handle regular JSON endpoints (general AI)
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(userToken && { 'Authorization': `Bearer ${userToken}` })
+        },
+        body: JSON.stringify(requestBody)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      Logger.log('✅ AI Response received:', result);
+      
+      // Extract the AI response - no frontend processing
+      let aiResponse = '';
+      if (result.type === 'success' && result.data?.aiResponse?.answer) {
+        aiResponse = result.data.aiResponse.answer;
+      } else if (result.response) {
+        aiResponse = result.response;
+      } else {
+        throw new Error(result.message || 'AI processing failed');
+      }
+      
+      // Add to conversation history
+      aiConversation.push({
+        role: 'assistant',
+        content: aiResponse
+      });
+      
+      // Stream the response word by word for visual effect
+      await streamTextWordByWord(aiResponse, messageId, updateAIMessage);
+    }
+    
+  } catch (error) {
+    Logger.error('❌ AI Request failed:', error);
+    
+    let errorMessage = "I'm sorry, I encountered an error while processing your request. Please try again.";
+    
+    if (error.message.includes('429')) {
+      errorMessage = "I'm currently experiencing high demand. Please wait a moment and try again.";
+    } else if (error.message.includes('401')) {
+      errorMessage = "Authentication issue. Please try logging in again.";
+    } else if (error.message.includes('network') || error.message.includes('fetch')) {
+      errorMessage = "Connection issue. Please check your internet connection and try again.";
+    }
+    
+    updateAIMessage(messageId, errorMessage, true);
   }
+}
+
+
+
+// Initialize the welcome message
+setTimeout(() => {
+  const welcomeDiv = document.createElement('div');
+  welcomeDiv.setAttribute('data-welcome', 'true');
+  welcomeDiv.innerHTML = `
+    <div style="padding: 32px 20px; text-align: center; color: #6e6e80;">
+      <div style="font-size: 32px; margin-bottom: 16px;">💬</div>
+      <div style="font-size: 20px; font-weight: 600; margin-bottom: 8px; color: #202123;">How can I help you today?</div>
+      <div style="font-size: 14px;">Ask me anything about your studies or coursework</div>
+    </div>
+  `;
   
-  messagesContainer.appendChild(messageEl);
-  messagesContainer.scrollTop = messagesContainer.scrollHeight;
-}
-}
+  const messagesContainer = document.getElementById('lynkk-ai-messages');
+  if (messagesContainer && messagesContainer.children.length === 0) {
+    messagesContainer.appendChild(welcomeDiv);
+  }
+}, 100);
+
+} // End of showStandaloneAIAssistant function
+
 
 // ==================== CHAT & MESSAGE FUNCTIONS ====================
 
@@ -9544,7 +10289,7 @@ async function sendMessage() {
     const authToken = await getAuthToken();
     
     if (!authToken) {
-      console.error('No auth token available');
+      Logger.error('No auth token available');
       showToast('Authentication error - please log in again', 'error');
       return;
     }
@@ -9558,7 +10303,7 @@ async function sendMessage() {
       });
       
       if (!result.activeSession || (!result.activeSession.id && !result.activeSession?.data?.id)) {
-        console.error('No active session or session ID is missing');
+        Logger.error('No active session or session ID is missing');
         showToast('Session error - missing session ID. Please refresh', 'error');
         return;
       }
@@ -9570,7 +10315,7 @@ async function sendMessage() {
       const sessionId = sessionData?.id || result.activeSession.id;
   
       if (!sessionId) {
-        console.error('No session ID found');
+        Logger.error('No session ID found');
         showToast('Session error - missing session ID. Please refresh', 'error');
         return;
       }
@@ -9579,7 +10324,7 @@ async function sendMessage() {
       const authToken = await getAuthToken();
   
       if(!authToken) {
-        console.error('No auth token available');
+        Logger.error('No auth token available');
         showToast('Authentication error - please log in again', 'error');
         return;
       }
@@ -9593,7 +10338,7 @@ async function sendMessage() {
       const userName = authState.user.username || authState.user.full_name || 'User';
       
       if (!userId) {
-        console.error('User ID not found');
+        Logger.error('User ID not found');
         showToast('Authentication error - user information missing', 'error');
         return;
       }
@@ -9636,7 +10381,7 @@ async function sendMessage() {
       // Send message to server
       chrome.runtime.sendMessage({
         type: 'API_REQUEST',
-        url: `http://localhost:3000/api/sessions/${sessionId}/messages`,
+        url: `${API_BASE_URL}/api/sessions/${sessionId}/messages`,
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${authToken}`,
@@ -9644,12 +10389,12 @@ async function sendMessage() {
         },
         body: messageData
       }, (response) => {
-        console.log('Complete response from server:', response);
+        Logger.log('Complete response from server:', response);
         
         // Handle response
         try {
           if (!response.ok || response.error) {
-            console.error('Error sending message:', response.error || 'Unknown error');
+            Logger.error('Error sending message:', response.error || 'Unknown error');
             
             // Show error message to user
             showToast('Failed to send message. Please try again.', 'error');
@@ -9666,7 +10411,7 @@ async function sendMessage() {
             return;
           }
           
-          console.log('Message sent successfully:', response.data);
+          Logger.log('Message sent successfully:', response.data);
           
           // Get the current messages from storage
           chrome.storage.local.get(['sessionMessages'], (msgResult) => {
@@ -9690,7 +10435,7 @@ async function sendMessage() {
             });
           });
         } catch (error) {
-          console.error('Error handling response:', error);
+          Logger.error('Error handling response:', error);
           
           // Remove the temporary message in case of any error
           const tempMessage = document.getElementById(tempMessageId);
@@ -9702,7 +10447,7 @@ async function sendMessage() {
         }
       });
     } catch (error) {
-      console.error('Error in sendMessage:', error);
+      Logger.error('Error in sendMessage:', error);
       showToast('An unexpected error occurred', 'error');
     }
   }
@@ -9916,7 +10661,7 @@ async function sendMessage() {
     const authState = result.authState || {};
   
     if (!activeSession || !authState.token) {
-      console.error('No active session or auth token');
+      Logger.error('No active session or auth token');
       showToast('Session error - please refresh', 'error');
       return;
     }
@@ -9934,7 +10679,7 @@ async function sendMessage() {
       const response = await new Promise(resolve => {
         chrome.runtime.sendMessage({
           type: 'API_REQUEST',
-          url: `http://localhost:3000/api/sessions/${activeSession.id}/polls`,
+          url: `${API_BASE_URL}/api/sessions/${activeSession.id}/polls`,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -9951,7 +10696,7 @@ async function sendMessage() {
         throw new Error(response.error || 'Failed to create poll');
       }
   
-      console.log('Poll created successfully:', response.data);
+      Logger.log('Poll created successfully:', response.data);
       
       // Close the modal
       const modal = document.getElementById('lynkk-create-poll-modal');
@@ -9982,7 +10727,7 @@ async function sendMessage() {
         }
       });
     } catch (error) {
-      console.error('Error creating poll:', error);
+      Logger.error('Error creating poll:', error);
       createButton.innerHTML = originalButtonText;
       createButton.disabled = false;
       showToast(`Error: ${error.message}`, 'error');
@@ -10000,7 +10745,7 @@ async function sendMessage() {
     
     // Check if polls is a valid array before proceeding
     if (!polls || !Array.isArray(polls)) {
-      console.warn('Polls is not an array:', polls);
+      Logger.warn('Polls is not an array:', polls);
       container.innerHTML = `
         <div class="lynkk-empty-state">No polls available for this session.</div>
       `;
@@ -10184,7 +10929,7 @@ async function sendMessage() {
    * @param {string} optionId - The option ID
    */
   async function submitVote(pollId, optionId) {
-    console.log(`Submitting answer for poll ${pollId}, option ${optionId}`);
+    Logger.log(`Submitting answer for poll ${pollId}, option ${optionId}`);
     
     // Get active session and auth token
     const result = await new Promise(resolve => {
@@ -10195,7 +10940,7 @@ async function sendMessage() {
     const authState = result.authState || {};
   
     if (!activeSession || !authState.token) {
-      console.error('No active session or auth token');
+      Logger.error('No active session or auth token');
       return;
     }
     
@@ -10215,7 +10960,7 @@ async function sendMessage() {
         const response = await new Promise(resolve => {
           chrome.runtime.sendMessage({
             type: 'API_REQUEST',
-            url: `http://localhost:3000/api/sessions/${activeSession.id}/polls/${pollId}/answers`,
+            url: `${API_BASE_URL}/api/sessions/${activeSession.id}/polls/${pollId}/answers`,
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -10231,7 +10976,7 @@ async function sendMessage() {
           throw new Error(response.error || 'Failed to submit poll answer');
         }
     
-        console.log('Poll answer submitted successfully:', response.data);
+        Logger.log('Poll answer submitted successfully:', response.data);
         
         // Update the poll UI to show it's been answered
         if (pollContainer) {
@@ -10323,7 +11068,7 @@ async function sendMessage() {
       // Show success toast
       showToast('Vote submitted successfully!', 'success');
     } catch (error) {
-      console.error('Error submitting poll answer:', error);
+      Logger.error('Error submitting poll answer:', error);
       submitButton.textContent = originalText;
       submitButton.disabled = false;
       showToast(`Error: ${error.message}`, 'error');
@@ -10339,18 +11084,18 @@ async function sendMessage() {
  */
 function extractDataFromResponse(response, dataType = 'data') {
     if (!response) {
-      console.warn(`No response received for ${dataType}`);
+      Logger.warn(`No response received for ${dataType}`);
       return null;
     }
     
     if (!response.ok) {
-      console.error(`API error for ${dataType}:`, response.error || 'Unknown error');
+      Logger.error(`API error for ${dataType}:`, response.error || 'Unknown error');
       return null;
     }
     
     // Try to extract data from different response structures
     if (!response.data) {
-      console.warn(`No data in response for ${dataType}`);
+      Logger.warn(`No data in response for ${dataType}`);
       return null;
     }
     
@@ -10366,7 +11111,7 @@ function extractDataFromResponse(response, dataType = 'data') {
       return response.data.data;
     }
     
-    console.warn(`Unexpected response structure for ${dataType}:`, response.data);
+    Logger.warn(`Unexpected response structure for ${dataType}:`, response.data);
     return response.data; // Return whatever we have as a fallback
   }
 
@@ -10392,7 +11137,7 @@ function initializeExtension() {
   });
   
   isInitialized = true;
-  console.log('Extension initialized successfully');
+  Logger.log('Extension initialized successfully');
 }
 
 /**
@@ -10416,11 +11161,11 @@ function initializeChatInterface() {
 
 // Listen for auth changes and commands
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('Content script received message:', message);
+  Logger.log('Content script received message:', message);
   
   if (message.type === 'AUTH_CHANGED') {
     currentUser = message.authState.isLoggedIn ? message.authState.user : null;
-    console.log('Auth state updated:', currentUser);
+    Logger.log('Auth state updated:', currentUser);
     
     // Update chat UI if it exists
     if (chatContainerCreated) {
@@ -10457,15 +11202,8 @@ initializeExtension();
 
 // Also initialize on page load (for safety)
 window.addEventListener('load', function() {
-  console.log('Page loaded, ensuring components are initialized');
+  Logger.log('Page loaded, ensuring components are initialized');
   initializeExtension();
-});
-
-// Initialize Gemini AI with session context if available
-chrome.storage.local.get(['activeSession'], (result) => {
-  if (result.activeSession) {
-    initGeminiContext(result.activeSession);
-  }
 });
 
 // At the very bottom of your file
@@ -10475,21 +11213,21 @@ function testAnonymousDashboard() {
       const sessionId = result.activeSession.id;
       const authToken = result.authState.token;
       
-      console.log('=========== TEST DASHBOARD ===========');
-      console.log('Session ID:', sessionId);
-      console.log('Auth Token exists:', !!authToken);
+      Logger.log('=========== TEST DASHBOARD ===========');
+      Logger.log('Session ID:', sessionId);
+      Logger.log('Auth Token exists:', !!authToken);
       
       // Force initialize
       initializeAnonymousQuestionDashboard(sessionId, authToken);
       
       // Log key elements
       setTimeout(() => {
-        console.log('Anonymous tabs found:', document.querySelectorAll('.anon-tab').length);
-        console.log('Class questions container:', document.getElementById('lynkk-class-questions'));
-        console.log('Student questions container:', document.getElementById('lynkk-student-questions-history-container'));
+        Logger.log('Anonymous tabs found:', document.querySelectorAll('.anon-tab').length);
+        Logger.log('Class questions container:', document.getElementById('lynkk-class-questions'));
+        Logger.log('Student questions container:', document.getElementById('lynkk-student-questions-history-container'));
       }, 500);
     } else {
-      console.error('No session data found for testing');
+      Logger.error('No session data found for testing');
     }
   });
 }
@@ -10505,18 +11243,30 @@ window.testAnonymousDashboard = testAnonymousDashboard;
  * Debug function to check AI Assistant status
  */
 function checkAIAssistantStatus() {
-  console.log('🔍 AI Assistant Status Check:');
-  console.log('- currentSessionId:', currentSessionId || '❌ Not set');
-  console.log('- currentUser:', currentUser || '❌ Not set');
-  console.log('- AI functions available:', {
+  Logger.log('🔍 AI Assistant Status Check:');
+  Logger.log('- currentSessionId:', currentSessionId || '❌ Not set');
+  Logger.log('- currentUser:', currentUser || '❌ Not set');
+  Logger.log('- AI functions available:', {
     enhanced: typeof makeEnhancedBackendRequest === 'function',
     send: typeof sendAIQuestion === 'function'
   });
   
+  // Check authentication tokens
+  chrome.storage.local.get(['authState', 'userSessionToken'], (result) => {
+    Logger.log('🔑 Authentication Tokens:');
+    Logger.log('- authState.token:', result.authState?.token ? '✅ Available' : '❌ Missing');
+    Logger.log('- userSessionToken:', result.userSessionToken ? '✅ Available' : '❌ Missing');
+    Logger.log('- authState.isLoggedIn:', result.authState?.isLoggedIn || '❌ Not logged in');
+    
+    if (result.authState?.token) {
+      Logger.log('- Token preview:', result.authState.token.substring(0, 20) + '...');
+    }
+  });
+  
   if (currentSessionId && currentUser) {
-    console.log('✅ AI Assistant ready for use');
+    Logger.log('✅ AI Assistant ready for use');
   } else {
-    console.log('⚠️ AI Assistant not ready - missing session or user');
+    Logger.log('⚠️ AI Assistant not ready - missing session or user');
   }
   
   return {
@@ -10530,10 +11280,10 @@ function checkAIAssistantStatus() {
  * Debug function to check session context
  */
 function checkSessionContext() {
-  console.log('📋 Session Context:');
-  console.log('- Session ID:', currentSessionId || 'None');
-  console.log('- User:', currentUser ? `${currentUser.username || currentUser.full_name} (${currentUser.role})` : 'Not logged in');
-  console.log('- AI Tab Available:', !!document.getElementById('lynkk-ai-messages'));
+  Logger.log('📋 Session Context:');
+  Logger.log('- Session ID:', currentSessionId || 'None');
+  Logger.log('- User:', currentUser ? `${currentUser.username || currentUser.full_name} (${currentUser.role})` : 'Not logged in');
+  Logger.log('- AI Tab Available:', !!document.getElementById('lynkk-ai-messages'));
   
   return {
     sessionId: currentSessionId,
@@ -10546,29 +11296,121 @@ function checkSessionContext() {
  * Debug function to test enhanced backend connection
  */
 async function testEnhancedBackend() {
-  console.log('🧪 Testing Enhanced Backend Connection...');
+  Logger.log('🧪 Testing Enhanced Backend Connection...');
   
   if (!currentSessionId) {
-    console.error('❌ Cannot test - no active session');
+    Logger.error('❌ Cannot test - no active session');
     return { success: false, error: 'No active session' };
   }
   
   if (!currentUser) {
-    console.error('❌ Cannot test - user not logged in');
+    Logger.error('❌ Cannot test - user not logged in');
     return { success: false, error: 'User not logged in' };
   }
   
   try {
     const response = await makeEnhancedBackendRequest('Test connection to enhanced backend');
-    console.log('✅ Backend connection successful:', response);
+    Logger.log('✅ Backend connection successful:', response);
     return { success: true, response };
   } catch (error) {
-    console.error('❌ Backend connection failed:', error);
+    Logger.error('❌ Backend connection failed:', error);
     return { success: false, error: error.message };
   }
 }
+
+/**
+ * Debug function to test authentication
+ */
+async function testAuthentication() {
+  Logger.log('🔐 Testing Authentication...');
+  
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['authState', 'userSessionToken'], (result) => {
+      const auth = {
+        hasAuthState: !!result.authState,
+        hasToken: !!result.authState?.token,
+        isLoggedIn: result.authState?.isLoggedIn,
+        hasUserSessionToken: !!result.userSessionToken,
+        user: result.authState?.user
+      };
+      
+      Logger.log('Authentication Status:', auth);
+      
+      if (auth.hasToken) {
+        Logger.log('✅ Regular auth token available for Enhanced Backend');
+      } else {
+        Logger.log('❌ No regular auth token - this is the problem!');
+        Logger.log('💡 Solution: Log out and log back in to get a fresh token');
+      }
+      
+      resolve(auth);
+    });
+  });
+}
+
+/**
+ * Debug function to test general AI backend
+ */
+window.testGeneralAI = async function() {
+  Logger.log('🧪 Testing General AI Backend...');
+  
+  try {
+    // Get auth token if user is logged in (optional for general AI)
+    let userToken = null;
+    if (currentUser) {
+      const authResult = await new Promise((resolve) => {
+        chrome.storage.local.get(['authState'], (result) => {
+          resolve(result.authState?.token || null);
+        });
+      });
+      userToken = authResult;
+    }
+    
+    Logger.log('📤 Sending test question to General AI:', {
+      authenticated: !!userToken,
+      question: 'Hello, can you help me with a math problem?'
+    });
+    
+    const response = await fetch('${API_BASE_URL}/api/ai/general/ask-stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+        ...(userToken && { 'Authorization': `Bearer ${userToken}` })
+      },
+      body: JSON.stringify({ 
+        question: 'Hello, can you help me with a math problem?' 
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const result = await response.json();
+    Logger.log('✅ General AI Response:', result);
+    
+    if (result.type === 'success' && result.data?.aiResponse) {
+      Logger.log('💬 AI Answer:', result.data.aiResponse.answer.substring(0, 100) + '...');
+      
+      if (result.data.aiResponse.usage_info) {
+        Logger.log('📊 Usage Info:', result.data.aiResponse.usage_info);
+      }
+      
+      return { success: true, result };
+    } else {
+      throw new Error(result.message || 'AI processing failed');
+    }
+    
+  } catch (error) {
+    Logger.error('❌ General AI test failed:', error);
+    return { success: false, error: error.message };
+  }
+};
 
 // Make debug functions globally available
 window.checkAIAssistantStatus = checkAIAssistantStatus;
 window.checkSessionContext = checkSessionContext;
 window.testEnhancedBackend = testEnhancedBackend;
+window.testAuthentication = testAuthentication;
+window.testGeneralAI = testGeneralAI;
