@@ -905,8 +905,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'OPEN_AUTH_PAGE') {
     Logger.log('Background script received OPEN_AUTH_PAGE message');
     try {
-      // Store the original tab ID and URL before redirecting
-      chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+      // Get the current active tab in the main browser window (not popup)
+      chrome.tabs.query({active: true, lastFocusedWindow: true}, (tabs) => {
         if (!tabs || tabs.length === 0) {
           Logger.error('No active tab found');
           sendResponse({ success: false, error: 'No active tab found' });
@@ -916,9 +916,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const originalTab = tabs[0];
         Logger.log('Current tab info:', originalTab.id, originalTab.url);
         
-        // Ensure we have a valid URL, fallback to empty string if undefined/null
-        const returnUrl = originalTab.url || '';
-        Logger.log('Return URL for auth:', returnUrl);
+        // Determine the return URL with proper fallbacks
+        let returnUrl = '';
+        
+        if (originalTab.url) {
+          // Check if it's a valid web URL
+          if (originalTab.url.startsWith('http://') || originalTab.url.startsWith('https://')) {
+            returnUrl = originalTab.url;
+          } else if (originalTab.url.startsWith('chrome://') || originalTab.url.startsWith('chrome-extension://')) {
+            // For Chrome internal pages, use a generic fallback
+            returnUrl = 'chrome://newtab/';
+          } else {
+            // For any other case, use new tab
+            returnUrl = 'chrome://newtab/';
+          }
+        } else {
+          // No URL available, use new tab as fallback
+          returnUrl = 'chrome://newtab/';
+        }
+        
+        Logger.log('Processed return URL for auth:', returnUrl);
         
         // Store the original tab information
         chrome.storage.local.set({
@@ -1268,8 +1285,11 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         // Return to original tab if information is available
         chrome.storage.local.get(['originalTabInfo'], (result) => {
           if (result.originalTabInfo) {
-            // Only navigate back if we have a valid URL
-            if (result.originalTabInfo.url && result.originalTabInfo.url.trim() !== '') {
+            // Check if we have a valid return URL and it's not a fallback
+            if (result.originalTabInfo.url && 
+                result.originalTabInfo.url.trim() !== '' && 
+                !result.originalTabInfo.url.startsWith('chrome://newtab')) {
+              // Navigate back to the original URL
               chrome.tabs.update(result.originalTabInfo.tabId, {
                 active: true,
                 url: result.originalTabInfo.url
@@ -1281,7 +1301,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
                 chrome.tabs.remove(sender.tab.id);
               });
             } else {
-              // Just activate the original tab without changing URL
+              // Just activate the original tab without changing URL (for fallback cases)
               chrome.tabs.update(result.originalTabInfo.tabId, {
                 active: true
               }, (updatedTab) => {
