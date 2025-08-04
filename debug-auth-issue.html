@@ -180,13 +180,16 @@
             } else if (currentUrl.includes('localhost:3001')) {
                 log(`🔧 DEVELOPMENT environment detected (Port 3001)`, 'info');
                 log(`💡 Extension should accept messages from: http://localhost:3001`, 'info');
+            } else if (currentUrl.includes('asklynk.vercel.app')) {
+                log(`🚀 PRODUCTION environment detected (New Domain)`, 'info');
+                log(`💡 Extension should accept messages from: https://asklynk.vercel.app`, 'info');
             } else if (currentUrl.includes('asklynk-gzn56f93d')) {
-                log(`🚀 PRODUCTION environment detected`, 'info');
+                log(`🚀 PRODUCTION environment detected (Old Domain)`, 'info');
                 log(`💡 Extension should accept messages from: https://asklynk-gzn56f93d-sharath-chandra-s-projects.vercel.app`, 'info');
             } else {
                 log(`❓ UNKNOWN environment - URL: ${currentUrl}`, 'error');
                 log(`💡 Extension may not accept messages from this domain`, 'error');
-                log(`🔧 Supported domains: localhost:5173, localhost:3001, asklynk-gzn56f93d`, 'info');
+                log(`🔧 Supported domains: localhost:5173, localhost:3001, asklynk.vercel.app`, 'info');
             }
         }
 

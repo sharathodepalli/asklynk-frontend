@@ -1320,6 +1320,8 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
   // Check if sender URL starts with our auth page URL - ENHANCED VALIDATION
   const isAuthorizedDomain = sender.url && (
     sender.url.startsWith('http://localhost:5173') ||
+    sender.url.startsWith('http://localhost:3001') ||
+    sender.url.startsWith('https://asklynk.vercel.app') ||
     sender.url.startsWith('https://asklynk-gzn56f93d-sharath-chandra-s-projects.vercel.app') ||
     sender.url.startsWith(AUTH_PAGE_URL)
   );
