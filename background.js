@@ -870,6 +870,43 @@
 // Import environment configuration
 importScripts('config.js');
 
+// Create safe Logger fallback in case of Logger issues
+const SafeLogger = {
+  log: (...args) => {
+    try {
+      if (typeof Logger !== 'undefined') {
+        Logger.log(...args);
+      } else {
+        console.log(...args);
+      }
+    } catch (e) {
+      console.log(...args);
+    }
+  },
+  error: (...args) => {
+    try {
+      if (typeof Logger !== 'undefined') {
+        Logger.error(...args);
+      } else {
+        console.error(...args);
+      }
+    } catch (e) {
+      console.error(...args);
+    }
+  },
+  warn: (...args) => {
+    try {
+      if (typeof Logger !== 'undefined') {
+        Logger.warn(...args);
+      } else {
+        console.warn(...args);
+      }
+    } catch (e) {
+      console.warn(...args);
+    }
+  }
+};
+
 // Log extension information for debugging
 console.log('🚀 AskLynk Extension Background Script Loaded');
 console.log('📋 Extension ID:', chrome.runtime.id);
@@ -1280,30 +1317,52 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
   Logger.log('�📨 External message received from:', sender.url);
   Logger.log('📨 Message content:', message);
   
-  // Check if sender URL starts with our auth page URL
-  const isAuthorizedDomain = sender.url && sender.url.startsWith(AUTH_PAGE_URL);
+  // Check if sender URL starts with our auth page URL - ENHANCED VALIDATION
+  const isAuthorizedDomain = sender.url && (
+    sender.url.startsWith('http://localhost:5173') ||
+    sender.url.startsWith('https://asklynk-gzn56f93d-sharath-chandra-s-projects.vercel.app') ||
+    sender.url.startsWith(AUTH_PAGE_URL)
+  );
   console.log('🔍 Is authorized domain?', isAuthorizedDomain);
   
   // Only accept messages from your authentication page
   if (isAuthorizedDomain) {
     console.log('✅ AUTHORIZED - Processing message');
-    Logger.log('✅ Message from authorized domain');
+    try {
+      Logger.log('✅ Message from authorized domain');
+    } catch (e) {
+      console.log('✅ Message from authorized domain');
+    }
 
     if (message.type === 'LOGIN_SUCCESS') {
-      Logger.log('🔐 Processing LOGIN_SUCCESS message');
+      console.log('🔐 Processing LOGIN_SUCCESS message');
       
-      // Validate required fields
-      if (!message.token || !message.userId || !message.username) {
-        Logger.error('❌ Missing required login data:', {
-          hasToken: !!message.token,
-          hasUserId: !!message.userId,
-          hasUsername: !!message.username
-        });
-        sendResponse({ success: false, error: 'Invalid login data' });
-        return true;
+      // WRAP ENTIRE AUTH FLOW IN TRY-CATCH FOR SAFETY
+      try {
+        SafeLogger.log('🔐 Processing LOGIN_SUCCESS message');
+        
+        // Validate required fields
+        if (!message.token || !message.userId || !message.username) {
+          console.log('❌ Missing required login data:', {
+            hasToken: !!message.token,
+            hasUserId: !!message.userId,
+            hasUsername: !!message.username
+          });
+          SafeLogger.error('❌ Missing required login data:', {
+            hasToken: !!message.token,
+            hasUserId: !!message.userId,
+            hasUsername: !!message.username
+          });
+          sendResponse({ success: false, error: 'Invalid login data' });
+          return true;
+        }
+      
+      console.log('✅ All required fields present');
+      try {
+        Logger.log('✅ All required fields present');
+      } catch (e) {
+        console.log('✅ All required fields present (Logger failed)');
       }
-      
-      Logger.log('✅ All required fields present');
       
       console.log('🔄 BEFORE AUTH UPDATE - Current State:', {
         isLoggedIn: currentAuthState.isLoggedIn,
@@ -1331,18 +1390,35 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
       });
 
       // Debug log the token
-      Logger.log('Token received from login page (first 10 chars):', 
+      console.log('Token received from login page (first 10 chars):', 
         message.token ? message.token.substring(0, 10) + '...' : 'EMPTY');
+      try {
+        Logger.log('Token received from login page (first 10 chars):', 
+          message.token ? message.token.substring(0, 10) + '...' : 'EMPTY');
+      } catch (e) {
+        console.log('Token logged (Logger failed)');
+      }
 
-      // Store in Chrome storage
+      // Store in Chrome storage - CRITICAL SECTION
+      console.log('💾 ATTEMPTING TO SAVE AUTH STATE TO STORAGE...');
       chrome.storage.local.set({ authState: currentAuthState }, () => {
         if (chrome.runtime.lastError) {
-          Logger.error('❌ Error saving auth state:', chrome.runtime.lastError);
+          console.error('❌ Error saving auth state:', chrome.runtime.lastError);
+          try {
+            Logger.error('❌ Error saving auth state:', chrome.runtime.lastError);
+          } catch (e) {
+            console.error('❌ Error saving auth state (Logger failed):', chrome.runtime.lastError);
+          }
           sendResponse({ success: false, error: 'Failed to save auth state' });
           return;
         }
         
-        Logger.log('✅ Auth state saved successfully to storage');
+        console.log('✅ AUTH STATE SAVED SUCCESSFULLY TO STORAGE!');
+        try {
+          Logger.log('✅ Auth state saved successfully to storage');
+        } catch (e) {
+          console.log('✅ Auth state saved successfully to storage (Logger failed)');
+        }
         console.log('✅ SAVED AUTH STATE:', {
           isLoggedIn: currentAuthState.isLoggedIn,
           username: currentAuthState.user.username,
@@ -1414,6 +1490,34 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
       }, 100);
       
       return true;
+      
+      } catch (authError) {
+        console.error('🚨 CRITICAL ERROR in LOGIN_SUCCESS handler:', authError);
+        console.error('🚨 Auth flow failed, but attempting to save anyway...');
+        
+        // Try to save basic auth state even if there was an error
+        try {
+          currentAuthState = {
+            isLoggedIn: true,
+            user: {
+              id: message.userId,
+              username: message.username,
+              role: message.role || 'user'
+            },
+            token: message.token
+          };
+          
+          chrome.storage.local.set({ authState: currentAuthState }, () => {
+            console.log('🆘 EMERGENCY AUTH SAVE completed');
+            sendResponse({ success: true });
+          });
+        } catch (emergencyError) {
+          console.error('🆘 EMERGENCY AUTH SAVE also failed:', emergencyError);
+          sendResponse({ success: false, error: 'Authentication failed completely' });
+        }
+        
+        return true;
+      }
     }
   } else {
     console.log('❌ UNAUTHORIZED MESSAGE');
