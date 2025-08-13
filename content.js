@@ -5,6 +5,9 @@
  * including chat functionality, session management, and AI assistant integration.
  */
 
+console.log('🔧 AskLynk Content Script LOADED!');
+console.log('🌍 Current URL:', window.location.href);
+
 // Production configuration
 let API_BASE_URL = 'https://asklynk-backend-424701115132.us-central1.run.app';
 let CONFIG = null;
@@ -2796,9 +2799,9 @@ async function loadStudentSessionHistory() {
   
     // Using cookie-based auth - no tokens needed
     const userId = currentUser.id;
-      
-      // Fetch student's session history with UPDATED URL
-      chrome.runtime.sendMessage({
+    
+    // Fetch student's session history with UPDATED URL
+    chrome.runtime.sendMessage({
         type: 'API_CALL',
         // Fix URL to match your backend API route
         url: `${API_BASE_URL}/api/students/${userId}/sessions`,
@@ -2908,6 +2911,7 @@ async function loadStudentSessionHistory() {
         button.style.backgroundColor = '#5373E7';
       });
     });
+  });
 }
 
 /**
@@ -2976,7 +2980,6 @@ function endSession(sessionId) {
     // Success - reload the session list
     loadProfessorSessionHistory();
   });
-});
 }
 
 /**
@@ -11082,7 +11085,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true; // Keep the message channel open for async responses
 });
 
-// Call immediately
+// Call immediately with console logging for debugging
+console.log('🚀 AskLynk Content Script Starting...');
 initializeExtension();
 
 // Also initialize on page load (for safety)
