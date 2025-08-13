@@ -8034,14 +8034,14 @@ async function streamGenericAIResponse(question, messageId) {
     }
     
     Logger.log('🚀 Sending Generic AI request:', {
-      endpoint: `${API_BASE_URL}/api/ai/general/ask-stream`,
+      endpoint: `${API_BASE_URL}/api/ai-general/general/ask-stream`,
       question: question,
       authenticated: userAuthenticated
     });
     
     // TODO: Streaming API calls need to be routed through background script
     // For now, use makeApiCall for non-streaming version
-    const response = await makeApiCall(`${API_BASE_URL}/api/ai/general/ask`, 'POST', { question });
+    const response = await makeApiCall(`${API_BASE_URL}/api/ai-general/general/ask`, 'POST', { question });
     
     if (!response.ok) {
       throw new Error(`API call failed: ${response.error}`);
@@ -8245,7 +8245,22 @@ async function sendContextAwareAIMessage(question = null) {
     await streamContextAwareAIResponse(messageText, aiMessageId);
   } catch (error) {
     Logger.error('❌ Context-Aware AI Request failed:', error);
-    updateContextAwareAIMessage(aiMessageId, "I'm sorry, I encountered an error. Please try again.", false);
+    
+    // If session-specific AI fails with auth errors, fallback to general AI
+    if (error.message.includes('401') || error.message.includes('403') || error.message.includes('Authentication') || error.message.includes('Access denied')) {
+      Logger.log('🔄 Falling back to general AI due to session authorization issue...');
+      updateContextAwareAIMessage(aiMessageId, "Session AI unavailable, using general assistant...", false);
+      
+      try {
+        // Fall back to standalone AI but update the context-aware UI
+        await streamStandaloneAIResponseForContextUI(messageText, aiMessageId);
+      } catch (fallbackError) {
+        Logger.error('❌ Fallback to general AI also failed:', fallbackError);
+        updateContextAwareAIMessage(aiMessageId, "I'm sorry, I encountered an error. Please try again.", false);
+      }
+    } else {
+      updateContextAwareAIMessage(aiMessageId, "I'm sorry, I encountered an error. Please try again.", false);
+    }
   }
 }
 
@@ -8353,7 +8368,7 @@ async function streamContextAwareAIResponse(question, messageId) {
       });
     } else {
       // Use general AI for standalone users (no session context)
-      endpoint = `${API_BASE_URL}/api/ai/general/ask-stream`;
+      endpoint = `${API_BASE_URL}/api/ai-general/general/ask-stream`;
       requestBody = { question };
       Logger.log(`🔄 ROUTING ${currentUser?.role?.toUpperCase() || 'USER'} TO GENERIC ENDPOINT:`, {
         role: currentUser?.role,
@@ -8375,6 +8390,7 @@ async function streamContextAwareAIResponse(question, messageId) {
     // Make API request with dynamic endpoint
     const response = await fetch(endpoint, {
       method: 'POST',
+      credentials: 'include', // Include cookies for authentication
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
@@ -9631,20 +9647,102 @@ function formatAIContent(content) {
     .replace(/$/, '</p>');
 }
 
+// Stream AI response for standalone assistant that updates context-aware UI
+async function streamStandaloneAIResponseForContextUI(question, messageId) {
+  try {
+    Logger.log('🚀 Fallback Standalone AI - using generic endpoint:', {
+      endpoint: '${API_BASE_URL}/api/ai-general/general/ask-stream',
+      question: question,
+      messageId: messageId,
+      note: 'Fallback for failed session AI'
+    });
+    
+    const response = await fetch(`${API_BASE_URL}/api/ai-general/general/ask-stream`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+      },
+      body: JSON.stringify({ question })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let aiResponse = '';
+    
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') break;
+            
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.type === 'error' && parsed.error) {
+                const errorMessage = `❌ ${parsed.error}`;
+                updateContextAwareAIMessage(messageId, errorMessage, true);
+                return;
+              }
+              
+              if (parsed.type === 'chunk' && parsed.content) {
+                aiResponse += parsed.content;
+                updateContextAwareAIMessage(messageId, aiResponse, false);
+              } else if (parsed.content) {
+                aiResponse += parsed.content;
+                updateContextAwareAIMessage(messageId, aiResponse, false);
+              }
+            } catch (parseError) {
+              if (data.trim()) {
+                aiResponse += data + ' ';
+                updateContextAwareAIMessage(messageId, aiResponse, false);
+              }
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    
+    if (aiResponse) {
+      updateContextAwareAIMessage(messageId, aiResponse, true);
+    }
+    
+  } catch (error) {
+    Logger.error('❌ Fallback Standalone AI failed:', error);
+    const errorMessage = `❌ Fallback AI failed: ${error.message}`;
+    updateContextAwareAIMessage(messageId, errorMessage, true);
+    throw error;
+  }
+}
+
 // Stream AI response for standalone assistant - ALWAYS uses generic endpoint
 async function streamStandaloneAIResponse(question, messageId) {
   try {
     
     Logger.log('🚀 Standalone AI - FORCED to generic endpoint:', {
-      endpoint: '${API_BASE_URL}/api/ai/general/ask-stream',
+      endpoint: '${API_BASE_URL}/api/ai-general/general/ask-stream',
       question: question,
       authenticated: !!currentUser,
       note: 'Standalone AI always uses generic endpoint regardless of session status'
     });
     
     // ALWAYS use generic AI endpoint for standalone assistant
-    const response = await fetch(`${API_BASE_URL}/api/ai/general/ask-stream`, {
+    const response = await fetch(`${API_BASE_URL}/api/ai-general/general/ask-stream`, {
       method: 'POST',
+      credentials: 'include', // Include cookies for authentication
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
@@ -9812,7 +9910,7 @@ async function streamAIResponse(question, messageId) {
       });
     } else {
       // Use general AI for standalone users (no session context)
-      endpoint = `${API_BASE_URL}/api/ai/general/ask-stream`;
+      endpoint = `${API_BASE_URL}/api/ai-general/general/ask-stream`;
       requestBody = { question };
       Logger.log(`🔄 ROUTING ${currentUser?.role?.toUpperCase() || 'USER'} TO GENERIC ENDPOINT:`, {
         role: currentUser?.role,
@@ -11157,7 +11255,7 @@ window.testGeneralAI = async function() {
       question: 'Hello, can you help me with a math problem?'
     });
     
-    const response = await fetch(`${API_BASE_URL}/api/ai/general/ask-stream`, {
+    const response = await fetch(`${API_BASE_URL}/api/ai-general/general/ask-stream`, {
       method: 'POST',
       credentials: 'include',
       headers: {
