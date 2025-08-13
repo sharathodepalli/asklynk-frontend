@@ -572,23 +572,6 @@ function resetTranscriptBuffer() {
   }
 }
 
-/**
- * Test function to manually trigger voice transcript sending
- * Can be called from browser console: testVoiceTranscriptSending()
- */
-window.testVoiceTranscriptSending = async function() {
-  Logger.log('🧪 Testing voice transcript sending...');
-  
-  if (!currentSessionId) {
-    Logger.error('❌ No active session ID. Please start a session first.');
-    return;
-  }
-  
-  const testTranscript = "This is a test transcript to verify backend integration is working properly with the correct user session token.";
-  Logger.log('🧪 Sending test transcript:', testTranscript);
-  
-  await sendTranscriptToBackend(testTranscript);
-};
 
 // Token debug functions removed - now using cookie-based authentication
 
@@ -701,42 +684,6 @@ window.checkAIAssistantStatus = function() {
   };
 };
 
-/**
- * Test function to manually try AI request (for debugging)
- */
-window.testAIRequest = async function(question = "Hello, this is a test message") {
-  Logger.log('🧪 Testing Enhanced Backend AI request manually...');
-  
-  if (!currentSessionId) {
-    Logger.error('❌ No active session. Please start or join a session first.');
-    return;
-  }
-  
-  if (!currentUser) {
-    Logger.error('❌ No user logged in. Please log in first.');
-    return;
-  }
-  
-  try {
-    Logger.log('📤 Sending test question to Enhanced Backend:', question);
-    
-    const response = await makeEnhancedBackendRequest(question);
-    Logger.log('✅ Enhanced Backend AI Response received:', response.substring(0, 100) + '...');
-    return response;
-  } catch (error) {
-    Logger.error('❌ Enhanced Backend AI Request failed:', error.message);
-    
-    if (error.message.includes('401')) {
-      Logger.log('💡 Authentication issue - try logging out and back in');
-    } else if (error.message.includes('404')) {
-      Logger.log('💡 Session not found - make sure you are in an active session');
-    } else {
-      Logger.log('💡 Check your internet connection and try again');
-    }
-    
-    return null;
-  }
-};
 
 /**
  * Restart voice recognition with error handling
@@ -1675,50 +1622,6 @@ function showSecureAuthRequiredMessage() {
   
   document.body.appendChild(messageContainer);
   
-  // Add debug button for testing background script connection
-  const debugBtn = document.createElement('button');
-  debugBtn.textContent = '🔧 Test BG Connection';
-  debugBtn.style.cssText = `
-    position: fixed;
-    top: 10px;
-    right: 10px;
-    z-index: 10001;
-    background: orange;
-    color: white;
-    border: none;
-    padding: 8px 12px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
-  `;
-  debugBtn.addEventListener('click', () => {
-    Logger.log('🔧 Testing background script connection...');
-    
-    // First test - basic health check
-    chrome.runtime.sendMessage({ type: 'HEALTH_CHECK' }, (response) => {
-      Logger.log('🔧 Health check response:', response);
-      if (chrome.runtime.lastError) {
-        Logger.error('❌ Health check error:', chrome.runtime.lastError);
-        alert('❌ Background script error: ' + chrome.runtime.lastError.message);
-      } else if (response && response.success) {
-        Logger.log('✅ Background script is working!');
-        
-        // Second test - try to ping the service worker directly
-        chrome.runtime.sendMessage({ type: 'TEST_MESSAGE' }, (testResponse) => {
-          Logger.log('🧪 Test message response:', testResponse);
-          if (testResponse && testResponse.success) {
-            alert('✅ Background script is working! Extension ID: ' + response.extensionId + '\n\nTest message: ' + testResponse.message);
-          } else {
-            alert('⚠️ Health check passed but test message failed');
-          }
-        });
-      } else {
-        Logger.error('❌ Unexpected response:', response);
-        alert('❌ Unexpected response: ' + JSON.stringify(response));
-      }
-    });
-  });
-  document.body.appendChild(debugBtn);
   
   // Add event listeners
   const signInBtn = document.getElementById('lynkk-sign-in-button');
@@ -5993,27 +5896,6 @@ function showTab(tabName) {
 // Add this debugging function to check dashboard state
 
 
-// Add keyboard shortcut to trigger debugging
-document.addEventListener('keydown', (e) => {
-  if (e.ctrlKey && e.shiftKey && e.key === 'D') {
-    chrome.storage.local.get(['activeSession', 'authState'], (result) => {
-      if (result.activeSession?.id) {
-        debugAnonymousQuestions(result.activeSession.id);
-      } else {
-        Logger.log('No active session found for debugging');
-      }
-    });
-  }
-});
-
-
-// Add this to your event listeners to trigger debugging
-document.addEventListener('keydown', (e) => {
-  // Press Alt+Shift+D to debug anonymous dashboard
-  if (e.altKey && e.shiftKey && e.key === 'D') {
-    debugAnonymousDashboard();
-  }
-});
 
 function getAnonymousNameDisplay(sessionId) {
   // Try from localStorage first
@@ -11312,9 +11194,3 @@ window.testGeneralAI = async function() {
   }
 };
 
-// Make debug functions globally available
-window.checkAIAssistantStatus = checkAIAssistantStatus;
-window.checkSessionContext = checkSessionContext;
-window.testEnhancedBackend = testEnhancedBackend;
-window.testAuthentication = testAuthentication;
-window.testGeneralAI = testGeneralAI;
