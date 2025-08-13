@@ -5,6 +5,42 @@
  * including chat functionality, session management, and AI assistant integration.
  */
 
+// Production configuration
+let API_BASE_URL = 'https://asklynk-backend-424701115132.us-central1.run.app';
+let CONFIG = null;
+
+// Try to get enhanced config from window if available
+if (typeof window.AuthConfig !== 'undefined') {
+  CONFIG = window.AuthConfig.CONFIG;
+  API_BASE_URL = CONFIG.API_BASE_URL;
+  console.log('✅ Content script using enhanced config:', CONFIG.ENVIRONMENT);
+}
+
+// Enhanced logger for content script
+const Logger = {
+  log: (...args) => {
+    console.log('[AskLynk Content]', ...args);
+    // In production, you might want to send logs to analytics
+    if (CONFIG?.IS_DEVELOPMENT) {
+      // Additional debug logging in development
+    }
+  },
+  warn: (...args) => console.warn('[AskLynk Content]', ...args),
+  error: (...args) => {
+    console.error('[AskLynk Content]', ...args);
+    // Track errors in production
+    if (CONFIG?.IS_PRODUCTION) {
+      // Send to error tracking service
+    }
+  },
+  info: (...args) => console.info('[AskLynk Content]', ...args),
+  debug: (...args) => {
+    if (CONFIG?.DEBUG_LOGGING !== false) {
+      console.debug('[AskLynk Content]', ...args);
+    }
+  }
+};
+
 // Global state variables
 let chatContainerCreated = false;
 let chatVisible = false;
@@ -28,6 +64,15 @@ let voiceActivityDetected = false;
 let lastVoiceActivityTime = 0;
 let restartAttempts = 0;
 let isManuallyPaused = false;
+
+// Replacement for getAuthToken - now uses cookie-based auth through background script
+async function getAuthToken() {
+  Logger.log('🔍 getAuthToken called - using cookie-based auth, no tokens needed');
+  
+  // For cookie-based auth, we don't need tokens for API calls
+  // All API calls go through background script with cookies
+  return null; // Return null since we don't use bearer tokens anymore
+}
 
 // Smart voice capture configuration
 const VOICE_CAPTURE_CONFIG = {
@@ -74,152 +119,95 @@ function extractArrayFromResponse(response, defaultArray = []) {
 }
 
 /**
- * Gets the authentication token from the background script
- * @returns {Promise<string|null>} Authentication token or null if not authenticated
+ * Check if user is authenticated (with new cookie-based auth)
+ * @returns {Promise<boolean>} True if authenticated, false otherwise
  */
-async function getAuthToken() {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: 'REFRESH_TOKEN' }, (response) => {
-      if (response && response.success && response.token) {
-        resolve(response.token);
-      } else {
-        Logger.error('Failed to retrieve token from background');
-        resolve(null);
-      }
-    });
-  });
-}
-
-/**
- * Gets the user session token specifically for voice transcript API calls
- * This should use the actual Supabase user session token, not the anon key
- * @returns {Promise<string|null>} User session token or null if not authenticated
- */
-async function getUserSessionToken() {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: 'GET_USER_SESSION_TOKEN' }, (response) => {
-      if (response && response.success && response.sessionToken) {
-        Logger.log('✅ User session token retrieved for voice API');
-        resolve(response.sessionToken);
-      } else {
-        Logger.error('❌ Failed to retrieve user session token, falling back to regular auth token');
-        // Fallback to regular auth token
-        getAuthToken().then(resolve);
-      }
-    });
-  });
-}
-
-/**
- * Store the user's Supabase session token for voice transcript API calls
- * This should be called after successful Supabase authentication
- * @param {string} sessionToken - The user's Supabase session access_token
- */
-async function storeUserSessionToken(sessionToken) {
-  if (!sessionToken) {
-    Logger.error('❌ Cannot store empty session token');
+async function isAuthenticated() {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'CHECK_AUTH' });
+    return response && response.success && response.isAuthenticated;
+  } catch (error) {
+    Logger.error('❌ Auth check failed:', error);
     return false;
   }
-  
-  // Validate token format (should not be anon key)
-  if (sessionToken.includes('"role":"anon"')) {
-    Logger.error('❌ WRONG TOKEN: This is an anonymous key, not a user session token!');
-    Logger.error('❌ Expected user session token with role: "authenticated"');
-    return false;
-  }
-  
-  Logger.log('✅ Storing user session token for voice API:', sessionToken.substring(0, 20) + '...');
-  
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({
-      type: 'SET_USER_SESSION_TOKEN',
-      sessionToken: sessionToken
-    }, (response) => {
-      if (response && response.success) {
-        Logger.log('✅ User session token stored successfully');
-        resolve(true);
-      } else {
-        Logger.error('❌ Failed to store user session token:', response?.error);
-        resolve(false);
-      }
-    });
-  });
 }
 
 /**
- * Get and store the proper Supabase user session token
- * This function should be called after user successfully logs in
- * Call this from browser console: getAndStoreSupabaseSessionToken()
+ * Make an API call through the background script proxy (with cookies)
+ * @param {string} url - Full API URL
+ * @param {string} method - HTTP method
+ * @param {Object} body - Request body
+ * @returns {Promise<Object>} API response
  */
-window.getAndStoreSupabaseSessionToken = async function() {
-  Logger.log('🔑 Getting Supabase user session token...');
-  
-  // Check if Supabase is available
-  if (typeof window.supabase === 'undefined') {
-    Logger.error('❌ Supabase not available. Please ensure Supabase client is loaded.');
-    Logger.log('💡 Alternative: Manually set token with setTestUserSessionToken("your_token_here")');
-    return;
+async function makeApiCall(url, method = 'GET', body = null) {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'API_CALL',
+      url: url,
+      method: method,
+      body: body
+    });
+    
+    return response;
+  } catch (error) {
+    Logger.error('❌ API call failed:', error);
+    return { ok: false, error: error.message };
   }
+}
+
+/**
+ * Check if voice API calls are available (user authenticated)
+ * With cookie-based auth, voice API calls will use cookies automatically
+ * @returns {Promise<boolean>} True if voice API is available
+ */
+async function isVoiceApiAvailable() {
+  return await isAuthenticated();
+}
+
+// Token storage functions removed - now using cookie-based authentication
+
+// Token-related functions removed - now using cookie-based authentication
+
+/**
+ * Checks the user's authentication state using secure cookie-based auth
+ */
+async function checkAuthState() {
+  Logger.log('🔍 Checking secure auth state...');
   
   try {
-    // Get current session from Supabase
-    const { data: { session }, error } = await window.supabase.auth.getSession();
+    const response = await chrome.runtime.sendMessage({ type: 'CHECK_AUTH' });
+    Logger.log("🔍 Auth check response:", response);
     
-    if (error) {
-      Logger.error('❌ Error getting Supabase session:', error);
-      return;
-    }
-    
-    if (!session) {
-      Logger.error('❌ No active Supabase session found. Please log in first.');
-      return;
-    }
-    
-    if (!session.access_token) {
-      Logger.error('❌ No access token in session');
-      return;
-    }
-    
-    Logger.log('✅ Found Supabase session for user:', session.user.email);
-    Logger.log('✅ Session token:', session.access_token.substring(0, 20) + '...');
-    
-    // Store the user session token
-    const stored = await storeUserSessionToken(session.access_token);
-    
-    if (stored) {
-      Logger.log('🎉 SUCCESS: User session token stored! Voice transcripts will now use the correct token.');
-      Logger.log('🧪 Test voice capture now - it should save to database');
-    }
-    
-  } catch (error) {
-    Logger.error('❌ Error accessing Supabase session:', error);
-  }
-};
-
-/**
- * Checks the user's authentication state
- */
-function checkAuthState() {
-  chrome.runtime.sendMessage({ type: 'CHECK_AUTH' }, (response) => {
-    Logger.log("Auth check response:", response);
-    if (response && response.isLoggedIn) {
-      currentUser = response.user;
-      Logger.log('User is authenticated:', currentUser);
-      
-      // CRITICAL: Restore active session for students!
-      restoreActiveSession();
-      
-      // Update UI if chat container exists
-      if (chatContainerCreated) {
-        updateChatUI();
+    if (response && response.success) {
+      if (response.isAuthenticated && response.user) {
+        currentUser = response.user;
+        Logger.log('✅ User is authenticated:', currentUser);
+        
+        // CRITICAL: Restore active session for students!
+        restoreActiveSession();
+        
+        // Update UI if chat container exists
+        if (chatContainerCreated) {
+          updateChatUI();
+        }
+        
+        // Update floating button appearance
+        updateDraggableButton(); 
+      } else {
+        currentUser = null;
+        Logger.log('❌ User is not authenticated');
+        updateDraggableButton();
       }
-      
-      // Update floating button appearance
-      updateDraggableButton(); 
     } else {
-      Logger.log('User is not authenticated');
+      Logger.error('❌ Auth check failed:', response?.error);
+      currentUser = null;
+      updateDraggableButton();
     }
-  });
+  } catch (error) {
+    Logger.error('❌ Auth check error:', error);
+    currentUser = null;
+    updateDraggableButton();
+  }
 }
 
 /**
@@ -268,9 +256,9 @@ function capitalizeFirstLetter(string) {
 // Function to ensure a session is open before showing the anonymous dashboard
 function ensureSessionData(callback) {
   chrome.storage.local.get(['activeSession', 'authState'], (result) => {
-    if (result.activeSession && result.authState && result.authState.token) {
+    if (result.activeSession && currentUser) {
       // Session data exists, proceed with callback
-      callback(result.activeSession.id, result.authState.token);
+      callback(result.activeSession.id);
     } else {
       // No session data, prompt user to join a session
       const container = document.getElementById('lynkk-anonymous-content');
@@ -595,65 +583,7 @@ window.testVoiceTranscriptSending = async function() {
   await sendTranscriptToBackend(testTranscript);
 };
 
-/**
- * Test function to set a user session token manually
- * Can be called from browser console: setTestUserSessionToken('your_token_here')
- */
-window.setTestUserSessionToken = async function(sessionToken) {
-  Logger.log('🧪 Setting test user session token...');
-  
-  if (!sessionToken) {
-    Logger.error('❌ Please provide a session token');
-    Logger.log('💡 Usage: setTestUserSessionToken("eyJhbGciOiJIUzI1NiIsImtpZCI6...")');
-    return;
-  }
-  
-  // Validate token format
-  if (sessionToken.includes('"role":"anon"')) {
-    Logger.error('❌ WRONG TOKEN: This appears to be an anonymous key!');
-    Logger.error('❌ You need the user session token, not the anon key');
-    Logger.log('💡 Get the correct token with: getAndStoreSupabaseSessionToken()');
-    return;
-  }
-  
-  const stored = await storeUserSessionToken(sessionToken);
-  
-  if (stored) {
-    Logger.log('✅ Test user session token set successfully');
-    Logger.log('🧪 Now test voice capture: testVoiceTranscriptSending()');
-  }
-};
-
-/**
- * Test function to check what token is currently being used
- */
-window.checkCurrentTokenType = async function() {
-  Logger.log('🔍 Checking current token type...');
-  
-  try {
-    const userToken = await getUserSessionToken();
-    const regularToken = await getAuthToken();
-    
-    Logger.log('🔍 User session token:', userToken ? userToken.substring(0, 20) + '...' : 'NOT SET');
-    Logger.log('🔍 Regular auth token:', regularToken ? regularToken.substring(0, 20) + '...' : 'NOT SET');
-    
-    if (userToken && userToken !== regularToken) {
-      Logger.log('✅ GOOD: Using separate user session token for voice API');
-      
-      // Check if it's an anon key
-      if (userToken.includes('"role":"anon"')) {
-        Logger.log('❌ WARNING: User session token appears to be an anon key!');
-      } else {
-        Logger.log('✅ EXCELLENT: User session token appears to be correct');
-      }
-    } else {
-      Logger.log('❌ WARNING: Voice API will use regular auth token (likely anon key)');
-    }
-    
-  } catch (error) {
-    Logger.error('❌ Error checking tokens:', error);
-  }
-};
+// Token debug functions removed - now using cookie-based authentication
 
 /**
  * Test function to check current voice capture state
@@ -1226,39 +1156,13 @@ async function sendTranscriptToBackend(transcript) {
   Logger.log('✅ Sending transcript to backend (length:', transcript.length, ')');
   
   try {
-    // Use user session token instead of regular auth token for voice API
-    const authToken = await getUserSessionToken();
-    if (!authToken) {
-      Logger.error('❌ No user session token available for voice transcript');
+    // Check if user is authenticated (using cookie-based auth)
+    if (!currentUser) {
+      Logger.error('❌ User not authenticated - cannot send voice transcript');
       return;
     }
     
-    Logger.log('✅ User session token retrieved:', authToken.substring(0, 10) + '...');
-    
-    // Validate token type for debugging
-    try {
-      const tokenPayload = JSON.parse(atob(authToken.split('.')[1]));
-      const tokenRole = tokenPayload.role;
-      const tokenIss = tokenPayload.iss;
-      
-      Logger.log('🔍 Token validation:');
-      Logger.log('  - Role:', tokenRole);
-      Logger.log('  - Issuer:', tokenIss);
-      Logger.log('  - Subject (User ID):', tokenPayload.sub);
-      
-      if (tokenRole === 'anon') {
-        Logger.error('❌ CRITICAL: Using ANONYMOUS token for voice API!');
-        Logger.error('❌ This token will NOT save to database!');
-        Logger.error('💡 Fix: Call getAndStoreSupabaseSessionToken() first');
-        Logger.error('💡 Or use: setTestUserSessionToken("correct_user_token")');
-      } else if (tokenRole === 'authenticated') {
-        Logger.log('✅ EXCELLENT: Using USER SESSION token - will save to database!');
-      } else {
-        Logger.warn('⚠️ Unknown token role:', tokenRole);
-      }
-    } catch (e) {
-      Logger.warn('⚠️ Could not decode token for validation');
-    }
+    Logger.log('✅ User authenticated for voice transcript:', currentUser.username || currentUser.email);
     
     if (!currentSessionId) {
       Logger.error('❌ No current session ID available');
@@ -1286,13 +1190,9 @@ async function sendTranscriptToBackend(transcript) {
     
     // Send transcript to backend for processing and embedding generation
     chrome.runtime.sendMessage({
-      type: 'API_REQUEST',
+      type: 'API_CALL',
       url: apiUrl,
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${authToken}`,
-        'Content-Type': 'application/json'
-      },
       body: payload
     }, (response) => {
       Logger.log('📥 Backend response received:', response);
@@ -1608,12 +1508,12 @@ function createChatContainer() {
       
       // Confirm logout
       if (confirm('Are you sure you want to log out?')) {
-        chrome.runtime.sendMessage({ type: 'LOGOUT' }, (response) => {
+        chrome.runtime.sendMessage({ type: 'SIGN_OUT' }, (response) => {
           Logger.log('Logout response:', response);
           if (response && response.success) {
             toggleChat(); // Hide chat
             currentUser = null;
-            showAuthRequiredMessage();
+            showSecureAuthRequiredMessage();
           }
         });
       }
@@ -1718,10 +1618,10 @@ function positionChatContainer(button) {
 }
 
 /**
- * Function to show authentication required message
+ * Function to show secure authentication required message
  */
-function showAuthRequiredMessage() {
-  Logger.log('Showing auth required message');
+function showSecureAuthRequiredMessage() {
+  Logger.log('Showing secure auth required message');
   
   // Remove any existing message
   const existingMessage = document.getElementById('lynkk-auth-message');
@@ -1734,7 +1634,7 @@ function showAuthRequiredMessage() {
   messageContainer.style.position = 'fixed';
   messageContainer.style.bottom = '80px';
   messageContainer.style.right = '20px';
-  messageContainer.style.width = '280px';
+  messageContainer.style.width = '320px';
   messageContainer.style.padding = '20px';
   messageContainer.style.backgroundColor = '#fff';
   messageContainer.style.border = '1px solid #e5e7eb';
@@ -1749,39 +1649,103 @@ function showAuthRequiredMessage() {
         <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
       </div>
       <div style="font-weight: 600; font-size: 16px; color: #111827; margin-bottom: 5px;">Authentication Required</div>
-      <p style="margin-bottom: 20px; font-size: 14px; color: #6b7280; line-height: 1.5;">Please sign in to use AskLynk Chat and access all features.</p>
+      <p style="margin-bottom: 20px; font-size: 14px; color: #6b7280; line-height: 1.5;">Click the AskLynk extension icon in your browser toolbar to sign in securely and access all features.</p>
     </div>
-    <button id="lynkk-signin-btn" style="width: 100%; padding: 12px; background: linear-gradient(90deg, #4a66dd 0%, #5d7df5 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 14px; margin-bottom: 10px; transition: all 0.2s ease-in-out;">Sign In / Sign Up</button>
+    
+    <button id="lynkk-sign-in-button" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; margin-bottom: 15px; transition: transform 0.2s;">
+      🛡️ Sign In Securely
+    </button>
+    
+    <div style="display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px; background-color: #f0f4ff; border-radius: 6px; margin-bottom: 15px;">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4a66dd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+      <span style="font-size: 12px; color: #4a66dd; font-weight: 500;">Secure login with cookies - no passwords stored</span>
+    </div>
+    
     <div style="text-align: center; margin-top: 15px;">
-      <button id="lynkk-close-msg" style="background: none; border: none; cursor: pointer; color: #6b7280; font-size: 13px; transition: color 0.2s;">Close</button>
+      <button id="lynkk-close-msg" style="background: none; border: none; cursor: pointer; color: #6b7280; font-size: 13px; transition: color 0.2s;">Maybe later</button>
     </div>
   `;
   
   document.body.appendChild(messageContainer);
   
+  // Add debug button for testing background script connection
+  const debugBtn = document.createElement('button');
+  debugBtn.textContent = '🔧 Test BG Connection';
+  debugBtn.style.cssText = `
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 10001;
+    background: orange;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+  `;
+  debugBtn.addEventListener('click', () => {
+    Logger.log('🔧 Testing background script connection...');
+    
+    // First test - basic health check
+    chrome.runtime.sendMessage({ type: 'HEALTH_CHECK' }, (response) => {
+      Logger.log('🔧 Health check response:', response);
+      if (chrome.runtime.lastError) {
+        Logger.error('❌ Health check error:', chrome.runtime.lastError);
+        alert('❌ Background script error: ' + chrome.runtime.lastError.message);
+      } else if (response && response.success) {
+        Logger.log('✅ Background script is working!');
+        
+        // Second test - try to ping the service worker directly
+        chrome.runtime.sendMessage({ type: 'TEST_MESSAGE' }, (testResponse) => {
+          Logger.log('🧪 Test message response:', testResponse);
+          if (testResponse && testResponse.success) {
+            alert('✅ Background script is working! Extension ID: ' + response.extensionId + '\n\nTest message: ' + testResponse.message);
+          } else {
+            alert('⚠️ Health check passed but test message failed');
+          }
+        });
+      } else {
+        Logger.error('❌ Unexpected response:', response);
+        alert('❌ Unexpected response: ' + JSON.stringify(response));
+      }
+    });
+  });
+  document.body.appendChild(debugBtn);
+  
   // Add event listeners
-  const signinBtn = document.getElementById('lynkk-signin-btn');
+  const signInBtn = document.getElementById('lynkk-sign-in-button');
   const closeBtn = document.getElementById('lynkk-close-msg');
   
-  if (signinBtn) {
-    signinBtn.addEventListener('click', () => {
-      Logger.log('Opening authentication page');
-      chrome.runtime.sendMessage({ type: 'OPEN_AUTH_PAGE' }, (response) => {
-        Logger.log('Response from background script:', response);
-        if (chrome.runtime.lastError) {
-          Logger.error('Error sending message:', chrome.runtime.lastError);
+  if (signInBtn) {
+    signInBtn.addEventListener('click', async () => {
+      Logger.log('🔐 Secure sign-in button clicked');
+      signInBtn.textContent = '🔄 Opening secure sign-in...';
+      signInBtn.disabled = true;
+      
+      try {
+        const response = await chrome.runtime.sendMessage({ type: 'START_SIGN_IN' });
+        
+        if (response && response.success) {
+          Logger.log('✅ Sign-in successful');
+          messageContainer.remove();
+          await checkAuthState(); // Refresh auth state
+        } else {
+          Logger.error('❌ Sign-in failed:', response?.error);
+          signInBtn.textContent = '❌ Sign-in failed - try again';
+          setTimeout(() => {
+            signInBtn.textContent = '🛡️ Sign In Securely';
+            signInBtn.disabled = false;
+          }, 3000);
         }
-      });
-      messageContainer.remove();
-    });
-    
-    // Add hover effect
-    signinBtn.addEventListener('mouseenter', () => {
-      signinBtn.style.opacity = '0.9';
-    });
-    
-    signinBtn.addEventListener('mouseleave', () => {
-      signinBtn.style.opacity = '1';
+      } catch (error) {
+        Logger.error('❌ Sign-in error:', error);
+        signInBtn.textContent = '❌ Error - try again';
+        setTimeout(() => {
+          signInBtn.textContent = '🛡️ Sign In Securely';
+          signInBtn.disabled = false;
+        }, 3000);
+      }
     });
   }
   
@@ -1849,7 +1813,7 @@ function createDraggableChatButton() {
   button.style.boxShadow = '0 4px 10px rgba(0,0,0,0.2)';
   button.style.fontSize = '24px';
   button.style.fontWeight = 'bold';
-  button.style.zIndex = '9999'; // Ensure high z-index
+  button.style.zIndex = '2147483647'; // Maximum z-index to ensure visibility
   button.style.transition = 'all 0.2s ease';
   button.style.fontFamily = 'Inter, system-ui, -apple-system, sans-serif';
   button.style.userSelect = 'none'; // Prevent text selection during drag
@@ -1922,7 +1886,7 @@ function createDraggableChatButton() {
   });
   
   // Add click handler
-  button.addEventListener('click', (e) => {
+  button.addEventListener('click', async (e) => {
     if (isDragging) {
       // Prevent opening chat while dragging
       e.stopPropagation();
@@ -1931,11 +1895,12 @@ function createDraggableChatButton() {
     
     Logger.log('Button clicked, checking auth...');
     
-    // Re-check auth state to ensure it's current
-    chrome.runtime.sendMessage({ type: 'CHECK_AUTH' }, (response) => {
+    try {
+      // Re-check auth state to ensure it's current
+      const response = await chrome.runtime.sendMessage({ type: 'CHECK_AUTH' });
       Logger.log('Auth check response:', response);
       
-      if (response && response.isLoggedIn) {
+      if (response && response.success && response.isAuthenticated) {
         // User is authenticated, show chat
         currentUser = response.user;
         if (!chatContainerCreated) {
@@ -1946,10 +1911,13 @@ function createDraggableChatButton() {
           positionChatContainer(button);
         }
       } else {
-        // User is not authenticated, prompt to authenticate
-        showAuthRequiredMessage();
+        // User is not authenticated, show secure auth required message
+        showSecureAuthRequiredMessage();
       }
-    });
+    } catch (error) {
+      Logger.error('❌ Auth check failed:', error);
+      showSecureAuthRequiredMessage();
+    }
   });
   
   // Mouse events for dragging
@@ -2412,9 +2380,8 @@ function loadProfessorSessionHistory() {
     </div>
   `;
   
-  // Get auth token
-  getAuthToken().then(authToken => {
-    if (!authToken) {
+  // Check if user is authenticated
+  if (!currentUser) {
       // Handle missing token error
       sessionListContainer.innerHTML = `
         <div style="text-align: center; padding: 30px 20px; background-color: #f9fafb; border-radius: 8px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);">
@@ -2439,11 +2406,10 @@ function loadProfessorSessionHistory() {
         });
       }
       return;
-    }
+  }
     
-    // Get user information from storage
-    chrome.storage.local.get(['authState'], result => {
-      if (!result.authState?.user?.id) {
+  // Check if we have user ID from current authenticated user
+  if (!currentUser?.id) {
         // Handle missing user ID error
         sessionListContainer.innerHTML = `
           <div style="text-align: center; padding: 30px 20px; background-color: #f9fafb; border-radius: 8px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);">
@@ -2467,23 +2433,19 @@ function loadProfessorSessionHistory() {
           });
         }
         return;
-      }
+  }
       
-      const professorId = result.authState.user.id;
-      const apiBaseUrl = API_BASE_URL;
-      const sessionsUrl = `${apiBaseUrl}/api/sessions/professor/${professorId}`;
-      
-      Logger.log('Fetching sessions from URL:', sessionsUrl);
-      
-      // Make API request for sessions
-      chrome.runtime.sendMessage({
-        type: 'API_REQUEST',
-        url: sessionsUrl,
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        }
+  const professorId = currentUser.id;
+  const apiBaseUrl = API_BASE_URL;
+  const sessionsUrl = `${apiBaseUrl}/api/sessions/professor/${professorId}`;
+  
+  Logger.log('Fetching sessions from URL:', sessionsUrl);
+  
+  // Make API request for sessions using background script proxy
+  chrome.runtime.sendMessage({
+    type: 'API_CALL',
+    url: sessionsUrl,
+    method: 'GET'
       }, (response) => {
         Logger.log('Session API response:', response);
         
@@ -2814,9 +2776,7 @@ function loadProfessorSessionHistory() {
           });
         });
       });
-    });
-  });
-}
+  }
 /**
 * Function to load student's session history
 */
@@ -2835,18 +2795,17 @@ async function loadStudentSessionHistory() {
         return;
       }
     
-      const authToken = result.authState.token || '';
+      // Using cookie-based auth - no tokens needed
       const userId = result.authState.user.id;
       
       // Fetch student's session history with UPDATED URL
       chrome.runtime.sendMessage({
-        type: 'API_REQUEST',
+        type: 'API_CALL',
         // Fix URL to match your backend API route
         url: `${API_BASE_URL}/api/students/${userId}/sessions`,
         method: 'GET',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
+          'Content-Type': 'application/json'
         }
       }, (response) => {
         // Rest of the function remains the same
@@ -2971,8 +2930,6 @@ function endSession(sessionId) {
     stopVoiceCapture();
   }
   
-  const authToken = result.authState.token || '';
-  
   // Create a loading indicator on the button
   const endButton = document.querySelector(`.lynkk-end-session-btn[data-session-id="${sessionId}"]`);
   if (endButton) {
@@ -2985,12 +2942,11 @@ function endSession(sessionId) {
   
   // Send the API request to end the session
   chrome.runtime.sendMessage({
-    type: 'API_REQUEST',
+    type: 'API_CALL',
     url: `${API_BASE_URL}/api/sessions/${sessionId}/end`,
     method: 'PUT',
     headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${authToken}`
+      'Content-Type': 'application/json'
     }
   }, (response) => {
     if (chrome.runtime.lastError) {
@@ -3397,10 +3353,8 @@ async function createSession() {
   submitButton.disabled = true;
   
   try {
-    // Get auth token using async/await
-    const authToken = await getAuthToken();
-    
-    if (!authToken) {
+    // Check if user is authenticated
+    if (!currentUser) {
       // Reset button state
       submitButton.innerHTML = originalButtonHTML;
       submitButton.disabled = false;
@@ -3410,15 +3364,11 @@ async function createSession() {
       return;
     }
     
-    // Make API request to create session
+    // Make API request to create session using background script proxy
     chrome.runtime.sendMessage({
-      type: 'API_REQUEST',
-      url: '${API_BASE_URL}/api/sessions',
+      type: 'API_CALL',
+      url: `${API_BASE_URL}/api/sessions`,
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${authToken}`
-      },
       body: {
         title: title,
         description: description || null,
@@ -3678,7 +3628,7 @@ Logger.log('wwwwwOpening session with ID:', sessionData.data.id);
     
 //     // Make API request to create session
 //     chrome.runtime.sendMessage({
-//       type: 'API_REQUEST',
+//       type: 'API_CALL',
 //       url: '${API_BASE_URL}/api/sessions',
 //       method: 'POST',
 //       headers: {
@@ -3768,14 +3718,12 @@ Logger.log('wwwwwOpening session with ID:', sessionData.data.id);
         joinButton.disabled = true;
         
         try {
-            // Get auth token
-            const authToken = await getAuthToken();
-            
-            if (!authToken) {
-            // Show error for not being logged in
-            errorElement.textContent = 'You need to be logged in to join a session';
-            errorElement.style.display = 'block';
-            sessionCodeInput.disabled = false;
+            // Check if user is authenticated using current auth state
+            if (!currentUser) {
+                // Show error for not being logged in
+                errorElement.textContent = 'You need to be logged in to join a session';
+                errorElement.style.display = 'block';
+                sessionCodeInput.disabled = false;
             
             if (joinButton) {
                 joinButton.innerHTML = originalContent;
@@ -3787,16 +3735,12 @@ Logger.log('wwwwwOpening session with ID:', sessionData.data.id);
             
             Logger.log('Attempting to join session with code:', sessionCode);
             
-            // Make API request to join session
+            // Make API request to join session using background script proxy
             chrome.runtime.sendMessage({
-            type: 'API_REQUEST',
-            url: `${API_BASE_URL}/api/sessions/join`,
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            },
-            body: { code: sessionCode }
+                type: 'API_CALL',
+                url: `${API_BASE_URL}/api/sessions/join`,
+                method: 'POST',
+                body: { code: sessionCode }
             }, (response) => {
             // Reset button state
             joinButton.innerHTML = originalContent;
@@ -3863,11 +3807,9 @@ async function openSession(sessionId) {
   Logger.log(`Opening session with ID: ${sessionId}`);
   
   try {
-    // Get auth token using the existing getAuthToken function
-    const authToken = await getAuthToken();
-    
-    if (!authToken) {
-      Logger.error('No auth token available');
+    // Check if user is authenticated
+    if (!currentUser) {
+      Logger.error('User not authenticated');
       showToast('Authentication error - please log in again', 'error');
       return;
     }
@@ -3899,12 +3841,9 @@ async function openSession(sessionId) {
     
     // Fetch session data
     chrome.runtime.sendMessage({
-      type: 'API_REQUEST',
+      type: 'API_CALL',
       url: `${API_BASE_URL}/api/sessions/${sessionId}`,
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${authToken}`
-      }
+      method: 'GET'
     }, (response) => {
       if (!response.ok || response.error) {
         Logger.error('Error fetching session:', response.error || 'Unknown error');
@@ -3985,11 +3924,9 @@ async function loadSessionData(sessionId) {
     currentSessionId = sessionId;
     Logger.log(`🎯 Setting currentSessionId to: ${sessionId}`);
     
-    // Get auth token
-    const authToken = await getAuthToken();
-    
-    if (!authToken) {
-      Logger.error('No auth token available');
+    // Check if user is authenticated
+    if (!currentUser) {
+      Logger.error('User not authenticated');
       return;
     }
     Logger.log(`Loading data for session: ${sessionId}`);
@@ -4003,12 +3940,9 @@ async function loadSessionData(sessionId) {
     Logger.log('Fetching messages...');
     const messagesResponse = await new Promise(resolve => {
       chrome.runtime.sendMessage({
-        type: 'API_REQUEST',
+        type: 'API_CALL',
         url: `${API_BASE_URL}/api/sessions/${sessionId}/messages`,
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${authToken}`
-        }
+        method: 'GET'
       }, resolve);
     });
     
@@ -4026,12 +3960,9 @@ async function loadSessionData(sessionId) {
     Logger.log('Fetching polls...');
     const pollsResponse = await new Promise(resolve => {
       chrome.runtime.sendMessage({
-        type: 'API_REQUEST',
+        type: 'API_CALL',
         url: `${API_BASE_URL}/api/sessions/${sessionId}/polls`,
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${authToken}`
-        }
+        method: 'GET'
       }, resolve);
     });
     
@@ -4049,12 +3980,10 @@ async function loadSessionData(sessionId) {
     Logger.log('Fetching anonymous questions...');
     const anonymousResponse = await new Promise(resolve => {
       chrome.runtime.sendMessage({
-        type: 'API_REQUEST',
+        type: 'API_CALL',
         url: `${API_BASE_URL}/api/anonymous/user/${sessionId}`,
         method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${authToken}`
-        }
+        headers: {}
       }, resolve);
     });
     Logger.log('Anonymous questions response:', anonymousResponse);
@@ -4067,7 +3996,7 @@ async function loadSessionData(sessionId) {
       // Get the container and call the new function
       const container = document.getElementById('lynkk-student-questions-history-container');
       if (container) {
-        loadStudentQuestionsForSession(sessionId, authToken);
+        loadStudentQuestionsForSession(sessionId);
       } else {
         Logger.log('Student questions container not found - will load later when tab is active');
       }
@@ -4077,12 +4006,9 @@ async function loadSessionData(sessionId) {
     Logger.log('Fetching analytics...');
     const analyticsResponse = await new Promise(resolve => {
       chrome.runtime.sendMessage({
-        type: 'API_REQUEST',
+        type: 'API_CALL',
         url: `${API_BASE_URL}/api/sessions/${sessionId}/analytics`,
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${authToken}`
-        }
+        method: 'GET'
       }, resolve);
     });
 
@@ -4771,7 +4697,7 @@ function initializeAIInterface() {
 
 
 
-function renderProfessorQuestionDashboard(container, sessionId, authToken) {
+function renderProfessorQuestionDashboard(container, sessionId) {
   if (!container) return;
 
   // Create the dashboard UI with a clean, modern design
@@ -4940,7 +4866,6 @@ function renderProfessorQuestionDashboard(container, sessionId, authToken) {
 
     fetchAndDisplayQuestions(
       sessionId, 
-      authToken, 
       sortSelect?.value || 'latest', 
       {
         search: searchInput?.value || '',
@@ -5155,7 +5080,7 @@ return () => {
 }
 
 // Function to fetch questions for the current session
-function fetchAndDisplayQuestions(sessionId, authToken, sortBy = 'latest', options = {}) {
+function fetchAndDisplayQuestions(sessionId, sortBy = 'latest', options = {}) {
   const filter = options.filter || 'all';
   const search = options.search || '';
   
@@ -5210,11 +5135,10 @@ function fetchAndDisplayQuestions(sessionId, authToken, sortBy = 'latest', optio
   // Make the API request with error handling
   try {
     chrome.runtime.sendMessage({
-      type: 'API_REQUEST',
+      type: 'API_CALL',
       url: url,
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       }
     }, (response) => {
@@ -5222,7 +5146,7 @@ function fetchAndDisplayQuestions(sessionId, authToken, sortBy = 'latest', optio
       questionsList.classList.remove('loading');
       
       if (!response || !response.ok) {
-        handleErrorResponse(questionsList, response, sessionId, authToken, sortBy, options);
+        handleErrorResponse(questionsList, response, sessionId, sortBy, options);
         return;
       }
       
@@ -5240,13 +5164,13 @@ function fetchAndDisplayQuestions(sessionId, authToken, sortBy = 'latest', optio
       }
       
       // Sort and render questions
-      renderQuestionsList(questionsList, questions, sortBy, sessionId, authToken);
+      renderQuestionsList(questionsList, questions, sortBy, sessionId);
     });
   } catch (error) {
     // Handle any unexpected errors
     Logger.error("Unexpected error:", error);
     questionsList.classList.remove('loading');
-    renderErrorState(questionsList, "An unexpected error occurred", sessionId, authToken, sortBy, options);
+    renderErrorState(questionsList, "An unexpected error occurred", sessionId, sortBy, options);
   }
 }
 
@@ -5334,16 +5258,16 @@ function renderEmptyState(container, search, filter) {
   `;
 }
 // Helper function to handle error responses
-function handleErrorResponse(container, response, sessionId, authToken, sortBy, options) {
+function handleErrorResponse(container, response, sessionId, sortBy, options) {
   Logger.error("Error fetching questions:", response);
   
   const errorMessage = response?.data?.error || response?.error || "Unknown error";
   
-  renderErrorState(container, errorMessage, sessionId, authToken, sortBy, options);
+  renderErrorState(container, errorMessage, sessionId, sortBy, options);
 }
 
 // Helper function to render error state
-function renderErrorState(container, errorMessage, sessionId, authToken, sortBy, options) {
+function renderErrorState(container, errorMessage, sessionId, sortBy, options) {
   container.innerHTML = `
     <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: #EF4444;">
       <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 16px;">
@@ -5366,7 +5290,7 @@ function renderErrorState(container, errorMessage, sessionId, authToken, sortBy,
   const retryBtn = document.getElementById('lynkk-retry-questions-btn');
   if (retryBtn) {
     retryBtn.addEventListener('click', () => {
-      fetchAndDisplayQuestions(sessionId, authToken, sortBy, options);
+      fetchAndDisplayQuestions(sessionId, sortBy, options);
     });
     
     // Add hover effects
@@ -5383,7 +5307,7 @@ function renderErrorState(container, errorMessage, sessionId, authToken, sortBy,
 }
 
 // Helper function to render questions list
-function renderQuestionsList(container, questions, sortBy, sessionId, authToken) {
+function renderQuestionsList(container, questions, sortBy, sessionId) {
   // Sort questions client-side
   const sortedQuestions = [...questions].sort((a, b) => {
     if (sortBy === 'priority') {
@@ -5404,7 +5328,7 @@ function renderQuestionsList(container, questions, sortBy, sessionId, authToken)
   container.innerHTML = html;
   
   // Now attach event listeners
-  attachQuestionItemEventListeners(container, sessionId, authToken);
+  attachQuestionItemEventListeners(container, sessionId);
 }
 function createQuestionItemHTML(question) {
   // Safely escape and prepare content
@@ -5560,7 +5484,7 @@ function escapeHTML(str) {
 
 
 // Helper function to attach event listeners to question items
-function attachQuestionItemEventListeners(container, sessionId, authToken) {
+function attachQuestionItemEventListeners(container, sessionId) {
   // Attach hover effects
   container.querySelectorAll('.lynkk-question-item').forEach(item => {
     const isResolved = item.getAttribute('data-resolved') === 'true';
@@ -5579,7 +5503,7 @@ function attachQuestionItemEventListeners(container, sessionId, authToken) {
     button.addEventListener('click', function() {
       const questionId = this.getAttribute('data-question-id');
       const isResolved = this.getAttribute('data-resolved') === 'true';
-      resolveQuestion(sessionId, questionId, !isResolved, authToken);
+      resolveQuestion(sessionId, questionId, !isResolved);
     });
     
     // Add hover effects
@@ -5686,7 +5610,7 @@ function animateCounter(elementId, newValue) {
   }
 }
 
-function resolveQuestion(sessionId, questionId, resolved, authToken) {
+function resolveQuestion(sessionId, questionId, resolved) {
   const button = document.querySelector(`.lynkk-resolve-btn[data-question-id="${questionId}"]`);
   if (button) {
     // Store original content and styles
@@ -5706,11 +5630,10 @@ function resolveQuestion(sessionId, questionId, resolved, authToken) {
     
     // Make the API request
     chrome.runtime.sendMessage({
-      type: 'API_REQUEST',
+      type: 'API_CALL',
       url: `${API_BASE_URL}/api/sessions/${sessionId}/questions/${questionId}/resolve`,
       method: 'PUT',
       headers: {
-        'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       },
       body: { resolved }
@@ -5736,7 +5659,7 @@ function resolveQuestion(sessionId, questionId, resolved, authToken) {
       showToast(resolved ? 'Question resolved successfully' : 'Question reopened successfully', 'success');
       
       // Refresh the questions list
-      fetchAndDisplayQuestions(sessionId, authToken, currentSort, {
+      fetchAndDisplayQuestions(sessionId, currentSort, {
         search: currentSearch,
         filter: currentFilter
       });
@@ -5900,22 +5823,22 @@ function renderAnonymousComponents() {
       return;
     }
 
-    const authToken = result.authState.token;
+    // Using cookie-based auth - no tokens needed
 
-    Logger.log(`Session ID: ${sessionId}, Auth token exists: ${!!authToken}`);
+    Logger.log(`Session ID: ${sessionId}`);
 
     // Now proceed with the rest of the function
     if (result.authState.user && result.authState.user.role === 'professor') {
       // Render professor question dashboard
       const container = document.getElementById('lynkk-prof-questions-container');
       if (container) {
-        renderProfessorQuestionDashboard(container, sessionId, authToken);
+        renderProfessorQuestionDashboard(container, sessionId);
       } else {
         Logger.error('Professor questions container not found');
       }
     } else {
       // For students, initialize the anonymous question dashboard
-      initializeAnonymousQuestionDashboard(sessionId, authToken);
+      initializeAnonymousQuestionDashboard(sessionId);
     }
   });
 
@@ -5958,10 +5881,10 @@ function renderAnonymousComponents() {
               chrome.storage.local.get(['activeSession', 'authState'], (result) => {
                 if (result.activeSession && result.authState) {
                   const sessionId = result.activeSession.id || result.activeSession.data?.id;
-                  const authToken = result.authState.token;
+                  // Using cookie-based auth - no tokens needed
                   
-                  if (sessionId && authToken) {
-                    loadClassQuestionsForSession(sessionId, authToken);
+                  if (sessionId) {
+                    loadClassQuestionsForSession(sessionId);
                   }
                 }
               });
@@ -6093,7 +6016,7 @@ function getAnonymousNameDisplay(sessionId) {
   }
   
   // If not in cache, show placeholder and fetch from server
-  fetchAnonymousIdentity(sessionId, authToken).then(name => {
+  fetchAnonymousIdentity(sessionId).then(name => {
     if (name) {
       localStorage.setItem(`anonymousName_${sessionId}`, name);
       // Update UI with the name
@@ -6109,7 +6032,7 @@ function getAnonymousNameDisplay(sessionId) {
 
 
 // Update fetchAnonymousIdentity function to properly handle and display identity
-function fetchAnonymousIdentity(sessionId, authToken) {
+function fetchAnonymousIdentity(sessionId) {
   return new Promise((resolve, reject) => {
     Logger.log(`Fetching anonymous identity for session ${sessionId}...`);
     
@@ -6137,7 +6060,7 @@ function fetchAnonymousIdentity(sessionId, authToken) {
       resolve(cachedResult);
       
       // Still try to refresh in the background without blocking
-      refreshAnonymousIdentityInBackground(sessionId, authToken, cachedName);
+      refreshAnonymousIdentityInBackground(sessionId, cachedName);
       return;
     }
     
@@ -6167,27 +6090,26 @@ function fetchAnonymousIdentity(sessionId, authToken) {
         resolve(storedResult);
         
         // Still try to refresh in the background without blocking
-        refreshAnonymousIdentityInBackground(sessionId, authToken, storedName);
+        refreshAnonymousIdentityInBackground(sessionId, storedName);
         return;
       }
       
       // No cached or stored identity, fetch from server
-      makeIdentityApiRequest(sessionId, authToken, resolve, reject);
+      makeIdentityApiRequest(sessionId, resolve, reject);
     });
   });
 }
 
 // Helper function to refresh identity in background
-function refreshAnonymousIdentityInBackground(sessionId, authToken, currentName) {
+function refreshAnonymousIdentityInBackground(sessionId, currentName) {
   Logger.log(`Refreshing anonymous identity in background for session ${sessionId}...`);
   
   // Make API request without blocking the main flow
   chrome.runtime.sendMessage({
-    type: 'API_REQUEST',
+    type: 'API_CALL',
     url: `${API_BASE_URL}/api/anonymous/${sessionId}/identity`,
     method: 'GET',
     headers: {
-      'Authorization': `Bearer ${authToken}`,
       'Content-Type': 'application/json'
     }
   }, (response) => {
@@ -6239,13 +6161,12 @@ function refreshAnonymousIdentityInBackground(sessionId, authToken, currentName)
 }
 
 // Helper function to make the actual API request
-function makeIdentityApiRequest(sessionId, authToken, resolve, reject) {
+function makeIdentityApiRequest(sessionId, resolve, reject) {
   chrome.runtime.sendMessage({
-    type: 'API_REQUEST',
+    type: 'API_CALL',
     url: `${API_BASE_URL}/api/anonymous/${sessionId}/identity`,
     method: 'GET',
     headers: {
-      'Authorization': `Bearer ${authToken}`,
       'Content-Type': 'application/json'
     }
   }, (response) => {
@@ -6306,7 +6227,7 @@ function makeIdentityApiRequest(sessionId, authToken, resolve, reject) {
 }
 
 
-function synchronizeAnonymousIdentity(sessionId, authToken) {
+function synchronizeAnonymousIdentity(sessionId) {
   return new Promise((resolve, reject) => {
     Logger.log(`Synchronizing anonymous identity for session ${sessionId}`);
     
@@ -6323,7 +6244,7 @@ function synchronizeAnonymousIdentity(sessionId, authToken) {
       
       // Still try to fetch fresh in background (non-blocking)
       setTimeout(() => {
-        fetchAnonymousIdentity(sessionId, authToken)
+        fetchAnonymousIdentity(sessionId)
           .catch(err => Logger.warn("Background identity refresh failed:", err));
       }, 100);
       
@@ -6331,7 +6252,7 @@ function synchronizeAnonymousIdentity(sessionId, authToken) {
     }
     
     // If no cache, try to fetch
-    fetchAnonymousIdentity(sessionId, authToken)
+    fetchAnonymousIdentity(sessionId)
       .then(identityData => {
         Logger.log(`Successfully synchronized anonymous identity: ${identityData.anonymous_name}`);
         resolve(identityData);
@@ -6393,7 +6314,7 @@ function generateTemporaryName() {
   return `${adj}${noun}${num}`;
 }
 
-  async function submitAnonymousQuestion(sessionId, authToken, questionText) {
+  async function submitAnonymousQuestion(sessionId, questionText) {
     const submitButton = document.querySelector('#lynkk-question-submit');
     
     try {
@@ -6404,19 +6325,18 @@ function generateTemporaryName() {
       }
       
       // First synchronize the identity to ensure consistency
-      const identity = await synchronizeAnonymousIdentity(sessionId, authToken);
+      const identity = await synchronizeAnonymousIdentity(sessionId);
       Logger.log(`Submitting question as ${identity.anonymous_name}`);
       
       // Submit question with synchronized identity
       return new Promise((resolve, reject) => {
         chrome.runtime.sendMessage({
-          type: 'API_REQUEST',
+          type: 'API_CALL',
           url: `${API_BASE_URL}/api/anonymous/${sessionId}/questions`,
           method: 'POST',
           timeoutMS: 10000, // 10 second timeout
           headers: {
-            'Authorization': `Bearer ${authToken}`,
-            'Content-Type': 'application/json'
+                'Content-Type': 'application/json'
           },
           body: {
             content: questionText.trim(),
@@ -6434,7 +6354,7 @@ function generateTemporaryName() {
           const questionsList = document.getElementById('lynkk-class-questions');
           if (questionsList) {
             // Trigger a refresh of questions
-            loadClassQuestionsForSession(sessionId, authToken);
+            loadClassQuestionsForSession(sessionId);
           }
           
           resolve(response.data);
@@ -6523,7 +6443,7 @@ if (!document.getElementById('anonymous-identity-styles')) {
 
 
 
-function renderStudentQuestionHistory(container, sessionId, authToken) {
+function renderStudentQuestionHistory(container, sessionId) {
   if (!container) return;
   
   Logger.log("Rendering student question history in container:", container.id);
@@ -6538,11 +6458,10 @@ function renderStudentQuestionHistory(container, sessionId, authToken) {
   
   // This function uses a different endpoint - critical fix from your original code
   chrome.runtime.sendMessage({
-    type: 'API_REQUEST',
+    type: 'API_CALL',
     url: `${API_BASE_URL}/api/anonymous/${sessionId}/questions`,
     method: 'GET',
     headers: {
-      'Authorization': `Bearer ${authToken}`,
       'Content-Type': 'application/json'
     }
   }, (response) => {
@@ -6568,7 +6487,7 @@ function renderStudentQuestionHistory(container, sessionId, authToken) {
         const retryButton = document.getElementById('lynkk-retry-history');
         if (retryButton) {
           retryButton.addEventListener('click', () => {
-            renderStudentQuestionHistory(container, sessionId, authToken);
+            renderStudentQuestionHistory(container, sessionId);
           });
         }
         return;
@@ -6748,7 +6667,7 @@ function renderStudentQuestionHistory(container, sessionId, authToken) {
       const retryButton = document.getElementById('lynkk-retry-history');
       if (retryButton) {
         retryButton.addEventListener('click', () => {
-          renderStudentQuestionHistory(container, sessionId, authToken);
+          renderStudentQuestionHistory(container, sessionId);
         });
       }
     }
@@ -6759,11 +6678,11 @@ function renderStudentQuestionHistory(container, sessionId, authToken) {
 
 
   // This function initializes the complete anonymous questions dashboard
-function initializeAnonymousQuestionDashboard(sessionId, authToken) {
+function initializeAnonymousQuestionDashboard(sessionId) {
   Logger.log('Initializing anonymous question dashboard for session:', sessionId);
   
-  if (!sessionId || !authToken) {
-    Logger.error('Missing session ID or auth token for anonymous question dashboard');
+  if (!sessionId) {
+    Logger.error('Missing session ID for anonymous question dashboard');
     return;
   }
 
@@ -6948,9 +6867,9 @@ function initializeAnonymousQuestionDashboard(sessionId, authToken) {
       
       // Special handling for class questions tab
       if (tabName === 'class-questions') {
-        loadClassQuestionsForSession(sessionId, authToken);
+        loadClassQuestionsForSession(sessionId);
       } else if (tabName === 'my-questions') {
-        loadStudentQuestionsForSession(sessionId, authToken);
+        loadStudentQuestionsForSession(sessionId);
       }
     });
   });
@@ -6959,18 +6878,18 @@ function initializeAnonymousQuestionDashboard(sessionId, authToken) {
   applyScrollingFixes();
   
   // Fetch anonymous identity
-  fetchAnonymousIdentity(sessionId, authToken)
+  fetchAnonymousIdentity(sessionId)
     .then(identity => {
       Logger.log('Anonymous identity loaded:', identity);
       
       // Load class questions for this session only
-      loadClassQuestionsForSession(sessionId, authToken);
+      loadClassQuestionsForSession(sessionId);
       
       // Load student's questions for this session only
-      loadStudentQuestionsForSession(sessionId, authToken);
+      loadStudentQuestionsForSession(sessionId);
       
       // Setup question form
-      setupQuestionForm(sessionId, authToken);
+      setupQuestionForm(sessionId);
     })
     .catch(error => {
       Logger.error('Error loading anonymous identity:', error);
@@ -7245,7 +7164,7 @@ function addDashboardStyles() {
 
 // Function to load class questions for this session only
 
-function loadClassQuestionsForSession(sessionId, authToken) {
+function loadClassQuestionsForSession(sessionId) {
   // Find the right container
   let container = document.getElementById('lynkk-class-questions');
   
@@ -7266,11 +7185,10 @@ function loadClassQuestionsForSession(sessionId, authToken) {
   
   // Make API request to the correct endpoint
   chrome.runtime.sendMessage({
-    type: 'API_REQUEST',
+    type: 'API_CALL',
     url: `${API_BASE_URL}/api/anonymous/session/${sessionId}`,
     method: 'GET',
     headers: {
-      'Authorization': `Bearer ${authToken}`,
       'Content-Type': 'application/json'
     }
   }, (response) => {
@@ -7356,7 +7274,7 @@ function loadClassQuestionsForSession(sessionId, authToken) {
       `;
       
       document.getElementById('lynkk-retry-class')?.addEventListener('click', () => {
-        loadClassQuestionsForSession(sessionId, authToken);
+        loadClassQuestionsForSession(sessionId);
       });
     }
   });
@@ -7366,7 +7284,7 @@ function loadClassQuestionsForSession(sessionId, authToken) {
 
 // Function to load student's questions for this session only
 
-function loadStudentQuestionsForSession(sessionId, authToken) {
+function loadStudentQuestionsForSession(sessionId) {
   const container = document.getElementById('lynkk-student-questions-history-container');
   if (!container) return;
   
@@ -7383,11 +7301,10 @@ function loadStudentQuestionsForSession(sessionId, authToken) {
   `;
   
   chrome.runtime.sendMessage({
-    type: 'API_REQUEST',
+    type: 'API_CALL',
     url: `${API_BASE_URL}/api/anonymous/${sessionId}/questions`,
     method: 'GET',
     headers: {
-      'Authorization': `Bearer ${authToken}`,
       'Content-Type': 'application/json'
     }
   }, (response) => {
@@ -7539,7 +7456,7 @@ function loadStudentQuestionsForSession(sessionId, authToken) {
       const retryButton = document.getElementById('lynkk-retry-my-questions');
       if (retryButton) {
         retryButton.addEventListener('click', () => {
-          loadStudentQuestionsForSession(sessionId, authToken);
+          loadStudentQuestionsForSession(sessionId);
         });
         
         // Add hover effect to retry button
@@ -7555,7 +7472,7 @@ function loadStudentQuestionsForSession(sessionId, authToken) {
   });
 }
 
-function setupQuestionForm(sessionId, authToken) {
+function setupQuestionForm(sessionId) {
   // Get all the necessary elements first
   const questionInput = document.getElementById('lynkk-question-input');
   const charCount = document.getElementById('lynkk-char-count');
@@ -7576,7 +7493,7 @@ function setupQuestionForm(sessionId, authToken) {
   }
   
   // First, load the anonymous identity
-  fetchAnonymousIdentity(sessionId, authToken)
+  fetchAnonymousIdentity(sessionId)
     .then(identity => {
       if (anonymousNameElement && identity && identity.anonymous_name) {
         anonymousNameElement.textContent = identity.anonymous_name;
@@ -7621,7 +7538,7 @@ function setupQuestionForm(sessionId, authToken) {
         
         if (anonymousToggle.checked) {
           // When ON: Show anonymous identity
-          fetchAnonymousIdentity(sessionId, authToken)
+          fetchAnonymousIdentity(sessionId)
             .then(identity => {
               if (identity && identity.anonymous_name) {
                 anonymousNameElement.textContent = identity.anonymous_name;
@@ -7690,11 +7607,11 @@ function setupQuestionForm(sessionId, authToken) {
         if (!anonymousToggle || anonymousToggle.checked) {
           // Submit anonymously
           Logger.log('Submitting as ANONYMOUS user');
-          await submitAnonymousQuestion(sessionId, authToken, questionText);
+          await submitAnonymousQuestion(sessionId, questionText);
         } else {
           // Submit with real identity
           Logger.log('Submitting as REAL user');
-          await submitIdentifiedQuestion(sessionId, authToken, questionText);
+          await submitIdentifiedQuestion(sessionId, questionText);
         }
         
         // Success - clear input
@@ -7715,11 +7632,11 @@ function setupQuestionForm(sessionId, authToken) {
         }
         
         // Refresh questions list
-        loadStudentQuestionsForSession(sessionId, authToken);
+        loadStudentQuestionsForSession(sessionId);
         if (typeof loadRecentQuestionsPreview === 'function') {
-          loadRecentQuestionsPreview(sessionId, authToken);
+          loadRecentQuestionsPreview(sessionId);
         }
-        loadClassQuestionsForSession(sessionId, authToken);
+        loadClassQuestionsForSession(sessionId);
         
         // Hide success message after 3 seconds
         setTimeout(() => {
@@ -7743,7 +7660,7 @@ function setupQuestionForm(sessionId, authToken) {
 }
 
 // Function to submit a question with the user's real identity
-async function submitIdentifiedQuestion(sessionId, authToken, questionText) {
+async function submitIdentifiedQuestion(sessionId, questionText) {
   const submitButton = document.querySelector('#lynkk-question-submit');
   
   try {
@@ -7757,13 +7674,12 @@ async function submitIdentifiedQuestion(sessionId, authToken, questionText) {
     
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
-        type: 'API_REQUEST',
+        type: 'API_CALL',
         url: `${API_BASE_URL}/api/anonymous/${sessionId}/identified-questions`,
         method: 'POST',
         timeoutMS: 10000, // Add timeout for consistency
         headers: {
-          'Authorization': `Bearer ${authToken}`,
-          'Content-Type': 'application/json'
+            'Content-Type': 'application/json'
         },
         body: {
           content: questionText.trim()
@@ -7781,7 +7697,7 @@ async function submitIdentifiedQuestion(sessionId, authToken, questionText) {
           const questionsList = document.getElementById('lynkk-class-questions');
           if (questionsList) {
             // Trigger a refresh of questions
-            loadClassQuestionsForSession(sessionId, authToken);
+            loadClassQuestionsForSession(sessionId);
           }
           
           resolve(response.data);
@@ -7806,17 +7722,16 @@ async function submitIdentifiedQuestion(sessionId, authToken, questionText) {
 
 // setupExtraQuestionFormHandlers();
 // Function to load a preview of recent questions
-function loadRecentQuestionsPreview(sessionId, authToken) {
+function loadRecentQuestionsPreview(sessionId) {
   const container = document.getElementById('lynkk-class-questions-preview');
   if (!container) return;
   
   // Make API request for recent questions, limit to 3
   chrome.runtime.sendMessage({
-    type: 'API_REQUEST',
+    type: 'API_CALL',
     url: `${API_BASE_URL}/api/anonymous/session/${sessionId}?limit=3`,
     method: 'GET',
     headers: {
-      'Authorization': `Bearer ${authToken}`,
       'Content-Type': 'application/json'
     }
   }, (response) => {
@@ -7873,7 +7788,7 @@ function loadRecentQuestionsPreview(sessionId, authToken) {
 }
 
  
-function loadClassQuestions(sessionId, authToken, targetContainer) {
+function loadClassQuestions(sessionId, targetContainer) {
   const container = targetContainer || document.getElementById('lynkk-class-questions');
   if (!container) return;
   
@@ -7894,11 +7809,10 @@ function loadClassQuestions(sessionId, authToken, targetContainer) {
   
   // Use the proper endpoint and handle the response correctly
   chrome.runtime.sendMessage({
-    type: 'API_REQUEST',
+    type: 'API_CALL',
     url: `${API_BASE_URL}/api/anonymous/session/${sessionId}`,
     method: 'GET',
     headers: {
-      'Authorization': `Bearer ${authToken}`,
       'Content-Type': 'application/json'
     }
   }, (response) => {
@@ -8050,7 +7964,7 @@ function loadClassQuestions(sessionId, authToken, targetContainer) {
       const retryButton = document.getElementById(`lynkk-retry-load-${container.id}`);
       if (retryButton) {
         retryButton.addEventListener('click', () => {
-          loadClassQuestions(sessionId, authToken, container);
+          loadClassQuestions(sessionId, container);
         });
       }
     }
@@ -8202,46 +8116,43 @@ async function sendGenericAIMessage(question = null) {
 
 /**
  * Stream generic AI response with real-time updates
+ * TODO: Implement streaming through background script proxy
  * @param {string} question - The user's question
  * @param {string} messageId - The message ID to update
  */
 async function streamGenericAIResponse(question, messageId) {
+  // DISABLED: Streaming API calls must go through background script
+  // This function needs to be rewritten to use background proxy
+  const messageElement = document.getElementById(messageId);
+  if (messageElement) {
+    messageElement.innerHTML = '<div style="color: #999;">Streaming API temporarily disabled - needs background proxy implementation</div>';
+  }
+  return;
+  
+  // Original streaming code commented out:
   try {
-    // Get auth token if user is logged in (optional for generic AI)
-    let userToken = null;
+    // Check if user is authenticated (with new cookie-based auth)
+    let userAuthenticated = false;
     if (currentUser) {
-      const authResult = await new Promise((resolve) => {
-        chrome.storage.local.get(['authState'], (result) => {
-          resolve(result.authState?.token || null);
-        });
-      });
-      userToken = authResult;
+      userAuthenticated = await isAuthenticated();
     }
     
     Logger.log('🚀 Sending Generic AI request:', {
       endpoint: `${API_BASE_URL}/api/ai/general/ask-stream`,
       question: question,
-      authenticated: !!userToken
+      authenticated: userAuthenticated
     });
     
-    // Make API request to generic AI backend with SSE
-    const response = await fetch(`${API_BASE_URL}/api/ai/general/ask-stream`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
-        ...(userToken && { 'Authorization': `Bearer ${userToken}` })
-      },
-      body: JSON.stringify({ question })
-    });
+    // TODO: Streaming API calls need to be routed through background script
+    // For now, use makeApiCall for non-streaming version
+    const response = await makeApiCall(`${API_BASE_URL}/api/ai/general/ask`, 'POST', { question });
     
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error(`API call failed: ${response.error}`);
     }
     
-    // Handle Server-Sent Events stream
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    // Handle non-streaming response
+    const data = response.data;
     let aiResponse = '';
     let hasError = false; // Track if we've encountered an error
     
@@ -8521,16 +8432,6 @@ function updateContextAwareAIMessage(messageId, content, isComplete = true) {
 // Stream context-aware AI response with real word-by-word streaming
 async function streamContextAwareAIResponse(question, messageId) {
   try {
-    // Get auth token
-    let userToken = null;
-    if (currentUser) {
-      const authResult = await new Promise((resolve) => {
-        chrome.storage.local.get(['authState'], (result) => {
-          resolve(result.authState?.token || null);
-        });
-      });
-      userToken = authResult;
-    }
     
     // Determine which endpoint to use based on session and authentication status
     let endpoint, requestBody;
@@ -8581,7 +8482,6 @@ async function streamContextAwareAIResponse(question, messageId) {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
-        ...(userToken && { 'Authorization': `Bearer ${userToken}` })
       },
       body: JSON.stringify(requestBody)
     });
@@ -8723,29 +8623,20 @@ async function makeEnhancedBackendRequest(question) {
   }
 
   try {
-    // Get auth token for authentication (not the voice transcript token)
-    const authToken = await new Promise((resolve) => {
-      chrome.storage.local.get(['authState'], (result) => {
-        resolve(result.authState?.token);
-      });
-    });
-
-    // Prepare headers with authentication
-    const headers = {
-      'Content-Type': 'application/json',
-      'Accept': 'text/event-stream'
-    };
-
-    // Add authentication header if token is available
-    if (authToken) {
-      headers['Authorization'] = `Bearer ${authToken}`;
-    } else {
-      throw new Error('🔑 No authentication token found. Please log in first.');
+    // Check if user is authenticated (with new cookie-based auth)
+    const userAuthenticated = await isAuthenticated();
+    
+    if (!userAuthenticated) {
+      throw new Error('🔑 Authentication required. Please log in first.');
     }
 
     const response = await fetch(`${API_BASE_URL}/api/enhanced/sessions/${currentSessionId}/ask-stream`, {
       method: 'POST',
-      headers: headers,
+      credentials: 'include', // Include cookies for auth
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream'
+      },
       body: JSON.stringify({
         sessionId: currentSessionId,
         question: question,
@@ -9345,7 +9236,7 @@ async function saveAIConversation(question, response) {
     }
     
     const userId = result.authState.user.id;
-    const authToken = result.authState.token;
+    // Using cookie-based auth - no tokens needed
     
     Logger.log(`Saving AI conversation with sessionId: ${sessionId} userId: ${userId}`);
     
@@ -9358,12 +9249,11 @@ async function saveAIConversation(question, response) {
     
     const newChatResponse = await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
-        type: 'API_REQUEST',
+        type: 'API_CALL',
         url: '${API_BASE_URL}/api/ai/chats',
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${authToken}`,
-          'Content-Type': 'application/json'
+            'Content-Type': 'application/json'
         },
         body: {
           session_id: sessionId,
@@ -9411,11 +9301,10 @@ async function saveAIConversation(question, response) {
    // Now save the user's question
    const userMessageResponse = await new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
-      type: 'API_REQUEST',
+      type: 'API_CALL',
       url: '${API_BASE_URL}/api/ai/messages',
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       },
       body: {
@@ -9444,11 +9333,10 @@ async function saveAIConversation(question, response) {
   // And save the AI's response
   const aiMessageResponse = await new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
-      type: 'API_REQUEST',
+      type: 'API_CALL',
       url: '${API_BASE_URL}/api/ai/messages',
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       },
       body: {
@@ -9478,12 +9366,11 @@ async function saveAIConversation(question, response) {
   try {
     await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
-        type: 'API_REQUEST',
+        type: 'API_CALL',
         url: '${API_BASE_URL}/api/ai/interactions',
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${authToken}`,
-          'Content-Type': 'application/json'
+            'Content-Type': 'application/json'
         },
         body: {
           session_id: sessionId,
@@ -9547,18 +9434,16 @@ try {
     return [];
   }
   
-  const authToken = result.authState.token;
   Logger.log(`Loading AI conversations for session ${sessionId}, user ${userId}`);
   
   // Get or create a chat for this session
   Logger.log('Getting or creating chat for user and session');
   const chatResponse = await new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
-      type: 'API_REQUEST',
+      type: 'API_CALL',
       url: '${API_BASE_URL}/api/ai/chats',
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       },
       body: {
@@ -9596,12 +9481,10 @@ try {
   // Fetch messages for this chat
   const messagesResponse = await new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
-      type: 'API_REQUEST',
+      type: 'API_CALL',
       url: `${API_BASE_URL}/api/ai/messages/${chatId}`,
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${authToken}`
-      }
+      headers: {}
     }, result => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
@@ -9875,7 +9758,6 @@ async function streamStandaloneAIResponse(question, messageId) {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
-        ...(userToken && { 'Authorization': `Bearer ${userToken}` })
       },
       body: JSON.stringify({ question })
     });
@@ -10071,8 +9953,7 @@ async function streamAIResponse(question, messageId) {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
-          ...(userToken && { 'Authorization': `Bearer ${userToken}` })
-        },
+          },
         body: JSON.stringify(requestBody)
       });
       
@@ -10151,8 +10032,7 @@ async function streamAIResponse(question, messageId) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(userToken && { 'Authorization': `Bearer ${userToken}` })
-        },
+          },
         body: JSON.stringify(requestBody)
       });
       
@@ -10286,10 +10166,9 @@ async function sendMessage() {
     const chatInput = document.getElementById('lynkk-chat-input');
     const message = chatInput.value.trim();
     
-    const authToken = await getAuthToken();
-    
-    if (!authToken) {
-      Logger.error('No auth token available');
+    // Check if user is authenticated
+    if (!currentUser) {
+      Logger.error('User not authenticated');
       showToast('Authentication error - please log in again', 'error');
       return;
     }
@@ -10321,10 +10200,9 @@ async function sendMessage() {
       }
       
       // Get auth token
-      const authToken = await getAuthToken();
-  
-      if(!authToken) {
-        Logger.error('No auth token available');
+      // Check if user is authenticated
+      if (!currentUser) {
+        Logger.error('User not authenticated');
         showToast('Authentication error - please log in again', 'error');
         return;
       }
@@ -10380,12 +10258,11 @@ async function sendMessage() {
       
       // Send message to server
       chrome.runtime.sendMessage({
-        type: 'API_REQUEST',
+        type: 'API_CALL',
         url: `${API_BASE_URL}/api/sessions/${sessionId}/messages`,
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${authToken}`,
-          'Content-Type': 'application/json'
+            'Content-Type': 'application/json'
         },
         body: messageData
       }, (response) => {
@@ -10658,9 +10535,8 @@ async function sendMessage() {
     });
     
     const activeSession = result.activeSession;
-    const authState = result.authState || {};
   
-    if (!activeSession || !authState.token) {
+    if (!activeSession || !currentUser) {
       Logger.error('No active session or auth token');
       showToast('Session error - please refresh', 'error');
       return;
@@ -10678,12 +10554,11 @@ async function sendMessage() {
     try {
       const response = await new Promise(resolve => {
         chrome.runtime.sendMessage({
-          type: 'API_REQUEST',
+          type: 'API_CALL',
           url: `${API_BASE_URL}/api/sessions/${activeSession.id}/polls`,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authState.token}`
           },
           body: {
             question,
@@ -10937,9 +10812,8 @@ async function sendMessage() {
     });
     
     const activeSession = result.activeSession;
-    const authState = result.authState || {};
   
-    if (!activeSession || !authState.token) {
+    if (!activeSession || !currentUser) {
       Logger.error('No active session or auth token');
       return;
     }
@@ -10959,13 +10833,12 @@ async function sendMessage() {
       try {
         const response = await new Promise(resolve => {
           chrome.runtime.sendMessage({
-            type: 'API_REQUEST',
+            type: 'API_CALL',
             url: `${API_BASE_URL}/api/sessions/${activeSession.id}/polls/${pollId}/answers`,
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${authState.token}`
-            },
+              },
             body: {
               option_index: optionId
             }
@@ -11123,21 +10996,31 @@ function extractDataFromResponse(response, dataType = 'data') {
 function initializeExtension() {
   if (isInitialized) return;
   
-  checkAuthState();
-  createDraggableChatButton();
+  // Check if we're on a supported page
+  const currentURL = window.location.href;
+  Logger.log('Initializing AskLynk on:', currentURL);
   
-  // Add window resize listener to reposition chat if needed
-  window.addEventListener('resize', () => {
-    if (chatContainerCreated && document.getElementById('lynkk-chat-container').style.display !== 'none') {
-      const button = document.getElementById('lynkk-float-button');
-      if (button) {
-        positionChatContainer(button);
+  if (currentURL.includes('meet.google.com') || currentURL.includes('instructure.com')) {
+    Logger.log('✅ Supported platform detected, initializing overlay...');
+    
+    checkAuthState();
+    createDraggableChatButton();
+    
+    // Add window resize listener to reposition chat if needed
+    window.addEventListener('resize', () => {
+      if (chatContainerCreated && document.getElementById('lynkk-chat-container').style.display !== 'none') {
+        const button = document.getElementById('lynkk-float-button');
+        if (button) {
+          positionChatContainer(button);
+        }
       }
-    }
-  });
-  
-  isInitialized = true;
-  Logger.log('Extension initialized successfully');
+    });
+    
+    isInitialized = true;
+    Logger.log('✅ AskLynk overlay initialized successfully');
+  } else {
+    Logger.log('❌ Unsupported platform, skipping overlay initialization');
+  }
 }
 
 /**
@@ -11161,18 +11044,27 @@ function initializeChatInterface() {
 
 // Listen for auth changes and commands
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  Logger.log('Content script received message:', message);
+  Logger.log('📨 Content script received message:', message.type);
   
-  if (message.type === 'AUTH_CHANGED') {
-    currentUser = message.authState.isLoggedIn ? message.authState.user : null;
-    Logger.log('Auth state updated:', currentUser);
+  if (message.type === 'AUTH_CHANGED' || message.type === 'AUTH_UPDATED') {
+    Logger.log('🔄 Processing auth update:', {
+      messageType: message.type,
+      authState: message.authState,
+      isAuthenticated: message.authState?.isAuthenticated,
+      hasUser: !!message.authState?.user
+    });
+    
+    currentUser = message.authState?.isAuthenticated ? message.authState.user : null;
+    Logger.log('✅ Auth state updated - currentUser:', currentUser);
     
     // Update chat UI if it exists
     if (chatContainerCreated) {
+      Logger.log('💬 Updating chat UI after auth change');
       updateChatUI();
     }
     
     // If the floating button exists, update its appearance
+    Logger.log('🖘 Updating draggable button after auth change');
     updateDraggableButton();
     
     // Send response to acknowledge receipt
@@ -11206,19 +11098,25 @@ window.addEventListener('load', function() {
   initializeExtension();
 });
 
+// Initialize on DOMContentLoaded as well
+document.addEventListener('DOMContentLoaded', function() {
+  Logger.log('DOM loaded, ensuring components are initialized');
+  initializeExtension();
+});
+
 // At the very bottom of your file
 function testAnonymousDashboard() {
   chrome.storage.local.get(['activeSession', 'authState'], (result) => {
-    if (result.activeSession && result.authState && result.authState.token) {
+    if (result.activeSession && currentUser) {
       const sessionId = result.activeSession.id;
-      const authToken = result.authState.token;
+      // Using cookie-based auth - no tokens needed
       
       Logger.log('=========== TEST DASHBOARD ===========');
       Logger.log('Session ID:', sessionId);
-      Logger.log('Auth Token exists:', !!authToken);
+      Logger.log('Using cookie-based auth - no token needed');
       
       // Force initialize
-      initializeAnonymousQuestionDashboard(sessionId, authToken);
+      initializeAnonymousQuestionDashboard(sessionId);
       
       // Log key elements
       setTimeout(() => {
@@ -11251,17 +11149,7 @@ function checkAIAssistantStatus() {
     send: typeof sendAIQuestion === 'function'
   });
   
-  // Check authentication tokens
-  chrome.storage.local.get(['authState', 'userSessionToken'], (result) => {
-    Logger.log('🔑 Authentication Tokens:');
-    Logger.log('- authState.token:', result.authState?.token ? '✅ Available' : '❌ Missing');
-    Logger.log('- userSessionToken:', result.userSessionToken ? '✅ Available' : '❌ Missing');
-    Logger.log('- authState.isLoggedIn:', result.authState?.isLoggedIn || '❌ Not logged in');
-    
-    if (result.authState?.token) {
-      Logger.log('- Token preview:', result.authState.token.substring(0, 20) + '...');
-    }
-  });
+  // Authentication is now cookie-based - no tokens needed
   
   if (currentSessionId && currentUser) {
     Logger.log('✅ AI Assistant ready for use');
@@ -11371,12 +11259,12 @@ window.testGeneralAI = async function() {
       question: 'Hello, can you help me with a math problem?'
     });
     
-    const response = await fetch('${API_BASE_URL}/api/ai/general/ask-stream', {
+    const response = await fetch(`${API_BASE_URL}/api/ai/general/ask-stream`, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
-        ...(userToken && { 'Authorization': `Bearer ${userToken}` })
+        'Accept': 'text/event-stream'
       },
       body: JSON.stringify({ 
         question: 'Hello, can you help me with a math problem?' 

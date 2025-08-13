@@ -63,7 +63,7 @@ function Popup() {
 
   // Handle logout
   const handleLogout = () => {
-    chrome.runtime.sendMessage({ type: 'LOGOUT' }, (response) => {
+    chrome.runtime.sendMessage({ type: 'SIGN_OUT' }, (response) => {
       if (response && response.success) {
         setAuthState({
           isLoggedIn: false,

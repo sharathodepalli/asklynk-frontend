@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AskLynk - Authentication Complete</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            text-align: center;
+            padding: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            max-width: 400px;
+        }
+        .icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+        .title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .message {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        .status {
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 500;
+            margin-top: 20px;
+        }
+        .success {
+            background: rgba(34, 197, 94, 0.2);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        .error {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .processing {
+            background: rgba(59, 130, 246, 0.2);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">🎓</div>
+        <div class="title">AskLynk</div>
+        <div class="message">Processing authentication...</div>
+        <div id="status" class="status processing">
+            Completing sign-in process...
+        </div>
+    </div>
+
+    <script>
+        console.log('🔄 AskLynk Auth Callback Page Loaded');
+        
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const success = urlParams.get('success');
+        const error = urlParams.get('error');
+        
+        const statusElement = document.getElementById('status');
+        const messageElement = document.querySelector('.message');
+        
+        console.log('📋 Callback parameters:', { success, error });
+        
+        if (success === 'true') {
+            // Authentication successful
+            console.log('✅ Authentication successful');
+            messageElement.textContent = 'Sign-in completed successfully!';
+            statusElement.textContent = '✅ Success! You can close this tab.';
+            statusElement.className = 'status success';
+            
+            // Close the tab after a short delay
+            setTimeout(() => {
+                window.close();
+            }, 2000);
+            
+        } else if (error) {
+            // Authentication failed
+            console.log('❌ Authentication failed:', error);
+            messageElement.textContent = 'Sign-in failed. Please try again.';
+            statusElement.textContent = `❌ Error: ${decodeURIComponent(error)}`;
+            statusElement.className = 'status error';
+            
+            // Close the tab after a longer delay for error reading
+            setTimeout(() => {
+                window.close();
+            }, 5000);
+            
+        } else {
+            // Unknown state
+            console.log('❓ Unknown authentication state');
+            messageElement.textContent = 'Authentication status unknown.';
+            statusElement.textContent = '❓ Please close this tab and try again.';
+            statusElement.className = 'status error';
+            
+            setTimeout(() => {
+                window.close();
+            }, 3000);
+        }
+        
+        // Send message to background script about the auth result
+        if (chrome && chrome.runtime) {
+            chrome.runtime.sendMessage({
+                type: 'AUTH_CALLBACK_RESULT',
+                success: success === 'true',
+                error: error || null
+            }, (response) => {
+                console.log('📨 Callback message sent to background:', response);
+            });
+        }
+    </script>
+</body>
+</html>
