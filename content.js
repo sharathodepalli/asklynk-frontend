@@ -50,6 +50,10 @@ let chatVisible = false;
 let currentUser = null;
 let isInitialized = false;
 
+// AI request throttling to prevent excessive API calls
+let lastAIRequestTime = 0;
+const AI_REQUEST_THROTTLE_MS = 1000; // 1 second minimum between requests
+
 // Voice capture state variables
 let voiceRecognition = null;
 let isVoiceCapturing = false;
@@ -4517,18 +4521,22 @@ function renderSessionTabs() {
       }
     });
 
-    // Send button click
-    aiSendBtn.addEventListener('click', () => {
-      if (aiInput.value.trim()) {
-        Logger.log('🚀 AI Send Button Clicked - Starting Smart Routing...');
-        Logger.log('📍 Current State:', {
-          currentSessionId: currentSessionId,
-          currentUser: currentUser?.username || 'Not logged in',
-          inputValue: aiInput.value.trim()
-        });
-        sendSmartAIMessage();
-      }
-    });
+    // Send button click - ensure single event listener
+    const existingHandler = aiSendBtn.getAttribute('data-handler-added');
+    if (!existingHandler) {
+      aiSendBtn.addEventListener('click', () => {
+        if (aiInput.value.trim()) {
+          Logger.log('🚀 AI Send Button Clicked - Starting Smart Routing...');
+          Logger.log('📍 Current State:', {
+            currentSessionId: currentSessionId,
+            currentUser: currentUser?.username || 'Not logged in',
+            inputValue: aiInput.value.trim()
+          });
+          sendSmartAIMessage();
+        }
+      });
+      aiSendBtn.setAttribute('data-handler-added', 'true');
+    }
 
     // Initialize AI interface based on session status
     initializeAIInterface();
@@ -8029,20 +8037,30 @@ function getCurrentSession() {
  * @param {string} question - The user's question (optional, reads from input if not provided)
  */
 async function sendSmartAIMessage(question = null) {
+  // Throttle AI requests to prevent excessive API calls
+  const currentTime = Date.now();
+  if (currentTime - lastAIRequestTime < AI_REQUEST_THROTTLE_MS) {
+    Logger.log('⏳ AI request throttled - too soon after last request');
+    showToast('Please wait before sending another message', 'info');
+    return;
+  }
+  lastAIRequestTime = currentTime;
+  
   const activeSession = getCurrentSession();
   
   Logger.log('🤖 Smart AI Routing:', {
     hasActiveSession: !!activeSession,
     sessionId: activeSession?.id,
-    user: activeSession?.user?.username || 'Not logged in'
+    user: activeSession?.user?.username || 'Not logged in',
+    throttleTime: currentTime
   });
   
   if (activeSession && activeSession.id) {
-    // User is in a session - use context-aware AI
+    // User is in a session - use context-aware AI (with relevance scoring)
     Logger.log('🎓 Using Context-Aware AI (Session Context)');
     await sendContextAwareAIMessage(question);
   } else {
-    // User is not in a session - use generic AI
+    // User is not in a session - use generic AI (no relevance scoring)
     Logger.log('💡 Using Generic AI (No Session Context)');
     await sendGenericAIMessage(question);
   }
@@ -9602,12 +9620,16 @@ aiInput.addEventListener('keydown', (e) => {
   }
 });
 
-// Send button click
-aiSendBtn.addEventListener('click', () => {
-  if (aiInput.value.trim()) {
-    sendAIMessage();
-  }
-});
+// Send button click - ensure single event listener
+const existingStandaloneHandler = aiSendBtn.getAttribute('data-standalone-handler');
+if (!existingStandaloneHandler) {
+  aiSendBtn.addEventListener('click', () => {
+    if (aiInput.value.trim()) {
+      sendAIMessage();
+    }
+  });
+  aiSendBtn.setAttribute('data-standalone-handler', 'true');
+}
 
 // Focus input
 setTimeout(() => aiInput.focus(), 100);
@@ -10983,11 +11005,14 @@ function extractDataFromResponse(response, dataType = 'data') {
  * Initialize the extension
  */
 function initializeExtension() {
-  if (isInitialized) return;
+  if (isInitialized) {
+    Logger.log('⚠️ Extension already initialized, skipping...');
+    return;
+  }
   
   // Check if we're on a supported page
   const currentURL = window.location.href;
-  Logger.log('Initializing AskLynk on:', currentURL);
+  Logger.log('🚀 Initializing AskLynk on:', currentURL);
   
   if (currentURL.includes('meet.google.com') || currentURL.includes('instructure.com')) {
     Logger.log('✅ Supported platform detected, initializing overlay...');
@@ -10995,15 +11020,19 @@ function initializeExtension() {
     checkAuthState();
     createDraggableChatButton();
     
-    // Add window resize listener to reposition chat if needed
-    window.addEventListener('resize', () => {
-      if (chatContainerCreated && document.getElementById('lynkk-chat-container').style.display !== 'none') {
-        const button = document.getElementById('lynkk-float-button');
-        if (button) {
-          positionChatContainer(button);
+    // Add resize listener only once
+    const resizeHandlerAdded = window.asklynkResizeHandler;
+    if (!resizeHandlerAdded) {
+      window.addEventListener('resize', () => {
+        if (chatContainerCreated && document.getElementById('lynkk-chat-container').style.display !== 'none') {
+          const button = document.getElementById('lynkk-float-button');
+          if (button) {
+            positionChatContainer(button);
+          }
         }
-      }
-    });
+      });
+      window.asklynkResizeHandler = true;
+    }
     
     isInitialized = true;
     Logger.log('✅ AskLynk overlay initialized successfully');
