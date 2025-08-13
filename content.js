@@ -2784,19 +2784,18 @@ async function loadStudentSessionHistory() {
     const sessionListContainer = document.getElementById('lynkk-student-session-list');
     if (!sessionListContainer) return;
   
-    // Get the student's auth token from storage
-    chrome.storage.local.get(['authState'], (result) => {
-      if (!result.authState || !result.authState.isLoggedIn || !result.authState.user) {
-        sessionListContainer.innerHTML = `
-          <div style="text-align: center; padding: 16px; background-color: white; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-              <p style="color: #64748b; margin: 0;">No recent sessions. Join a session to get started.</p>
-          </div>
-        `;
-        return;
-      }
-    
-      // Using cookie-based auth - no tokens needed
-      const userId = result.authState.user.id;
+    // Check if user is authenticated
+    if (!currentUser) {
+      sessionListContainer.innerHTML = `
+        <div style="text-align: center; padding: 16px; background-color: white; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+            <p style="color: #64748b; margin: 0;">No recent sessions. Join a session to get started.</p>
+        </div>
+      `;
+      return;
+    }
+  
+    // Using cookie-based auth - no tokens needed
+    const userId = currentUser.id;
       
       // Fetch student's session history with UPDATED URL
       chrome.runtime.sendMessage({
@@ -2909,8 +2908,6 @@ async function loadStudentSessionHistory() {
         button.style.backgroundColor = '#5373E7';
       });
     });
-  });
- });
 }
 
 /**
@@ -2918,8 +2915,7 @@ async function loadStudentSessionHistory() {
 * @param {string} sessionId - The session ID
 */
 function endSession(sessionId) {
- chrome.storage.local.get(['authState'], (result) => {
-  if (!result.authState || !result.authState.isLoggedIn) {
+  if (!currentUser) {
     alert('You must be logged in to end a session.');
     return;
   }
@@ -5755,12 +5751,12 @@ function renderAnonymousComponents() {
   Logger.log('Rendering anonymous components');
 
   // Get active session information with debug details
-  chrome.storage.local.get(['activeSession', 'authState'], (result) => {
+  chrome.storage.local.get(['activeSession'], (result) => {
     Logger.log('Active session data:', result.activeSession);
-    Logger.log('Auth state:', result.authState?.token ? 'Token exists' : 'No token');
+    Logger.log('Auth state:', currentUser ? 'User authenticated' : 'No user');
     
-    if (!result.activeSession || !result.authState) {
-      Logger.error('No active session or auth state found');
+    if (!result.activeSession || !currentUser) {
+      Logger.error('No active session or user authentication found');
       const container = document.getElementById('lynkk-anonymous-content');
       if (container) {
         container.innerHTML = `
@@ -5828,7 +5824,7 @@ function renderAnonymousComponents() {
     Logger.log(`Session ID: ${sessionId}`);
 
     // Now proceed with the rest of the function
-    if (result.authState.user && result.authState.user.role === 'professor') {
+    if (currentUser && currentUser.role === 'professor') {
       // Render professor question dashboard
       const container = document.getElementById('lynkk-prof-questions-container');
       if (container) {
@@ -7508,20 +7504,18 @@ function setupQuestionForm(sessionId) {
   if (toggleLabel) toggleLabel.textContent = "Ask Anonymously";
   if (toggleDescription) toggleDescription.textContent = "Your identity will be hidden";
   
-  // Get user information from storage
-  chrome.storage.local.get(['authState'], (result) => {
-    const user = result.authState?.user;
-    if (!user) {
-      Logger.error('User data not found in storage');
-      return;
-    }
+  // Get user information from currentUser
+  if (!currentUser) {
+    Logger.error('User data not found - user not authenticated');
+    return;
+  }
+  
+  Logger.log('User data loaded:', currentUser);
     
-    Logger.log('User data loaded:', user);
-    
-    // IMPORTANT: Store the real name for later use
-    const realName = user.firstName && user.lastName ? 
-      `${user.firstName} ${user.lastName}` : 
-      user.name || user.username || (user.email ? user.email.split('@')[0] : "Your Real Identity");
+  // IMPORTANT: Store the real name for later use
+  const realName = currentUser.firstName && currentUser.lastName ? 
+    `${currentUser.firstName} ${currentUser.lastName}` : 
+    currentUser.name || currentUser.username || (currentUser.email ? currentUser.email.split('@')[0] : "Your Real Identity");
     
     // Log real identity for debugging
     Logger.log('Real identity to use:', realName);
@@ -7565,7 +7559,6 @@ function setupQuestionForm(sessionId) {
         setTimeout(() => anonymousNameElement.classList.remove('highlight-flash'), 1000);
       });
     }
-  });
   
   // Handle character count for textarea (your existing code)
   if (questionInput && charCount) {
@@ -8442,28 +8435,28 @@ async function streamContextAwareAIResponse(question, messageId) {
       username: currentUser?.username || 'unknown',
       hasSessionId: !!currentSessionId,
       sessionId: currentSessionId,
-      hasToken: !!userToken
+      hasCurrentUser: !!currentUser
     });
     
-    if (currentSessionId && userToken) {
+    if (currentSessionId && currentUser) {
       // Use context-aware AI for session users (with session context)
       endpoint = `${API_BASE_URL}/api/enhanced/sessions/${currentSessionId}/ask-stream`;
       requestBody = { question };
       Logger.log(`✅ ROUTING ${currentUser?.role?.toUpperCase() || 'USER'} TO PERSONALIZED ENDPOINT:`, {
         role: currentUser?.role,
         sessionId: currentSessionId,
-        hasToken: !!userToken,
+        hasCurrentUser: !!currentUser,
         endpoint: endpoint
       });
     } else {
       // Use general AI for standalone users (no session context)
-      endpoint = '${API_BASE_URL}/api/ai/general/ask-stream';
+      endpoint = `${API_BASE_URL}/api/ai/general/ask-stream`;
       requestBody = { question };
       Logger.log(`🔄 ROUTING ${currentUser?.role?.toUpperCase() || 'USER'} TO GENERIC ENDPOINT:`, {
         role: currentUser?.role,
         reason: !currentSessionId ? 'No session' : 'No token',
         sessionId: currentSessionId,
-        hasToken: !!userToken,
+        hasCurrentUser: !!currentUser,
         endpoint: endpoint
       });
     }
@@ -8472,7 +8465,7 @@ async function streamContextAwareAIResponse(question, messageId) {
       endpoint: endpoint,
       question: question,
       sessionId: currentSessionId,
-      hasToken: !!userToken,
+      hasCurrentUser: !!currentUser,
       user: currentUser?.username || 'Unknown'
     });
     
@@ -9213,8 +9206,8 @@ async function saveAIConversation(question, response) {
       chrome.storage.local.get(['activeSession', 'authState'], result => resolve(result));
     });
     
-    if (!result.activeSession || !result.authState?.token) {
-      Logger.error('No active session or auth token');
+    if (!result.activeSession || !currentUser) {
+      Logger.error('No active session or user authentication');
       return false;
     }
     
@@ -9734,26 +9727,16 @@ function formatAIContent(content) {
 // Stream AI response for standalone assistant - ALWAYS uses generic endpoint
 async function streamStandaloneAIResponse(question, messageId) {
   try {
-    // Get auth token if user is logged in (optional for generic AI)
-    let userToken = null;
-    if (currentUser) {
-      const authResult = await new Promise((resolve) => {
-        chrome.storage.local.get(['authState'], (result) => {
-          resolve(result.authState?.token || null);
-        });
-      });
-      userToken = authResult;
-    }
     
     Logger.log('🚀 Standalone AI - FORCED to generic endpoint:', {
       endpoint: '${API_BASE_URL}/api/ai/general/ask-stream',
       question: question,
-      authenticated: !!userToken,
+      authenticated: !!currentUser,
       note: 'Standalone AI always uses generic endpoint regardless of session status'
     });
     
     // ALWAYS use generic AI endpoint for standalone assistant
-    const response = await fetch('${API_BASE_URL}/api/ai/general/ask-stream', {
+    const response = await fetch(`${API_BASE_URL}/api/ai/general/ask-stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -9897,16 +9880,6 @@ async function streamStandaloneAIResponse(question, messageId) {
 // Stream AI response - with real word-by-word streaming
 async function streamAIResponse(question, messageId) {
   try {
-    // Get auth token if user is logged in
-    let userToken = null;
-    if (currentUser) {
-      const authResult = await new Promise((resolve) => {
-        chrome.storage.local.get(['authState'], (result) => {
-          resolve(result.authState?.token || null);
-        });
-      });
-      userToken = authResult;
-    }
     
     // Determine which endpoint to use - EXPLICIT STUDENT/PROFESSOR ROUTING
     let endpoint, requestBody;
@@ -9917,28 +9890,28 @@ async function streamAIResponse(question, messageId) {
       username: currentUser?.username || 'unknown',
       hasSessionId: !!currentSessionId,
       sessionId: currentSessionId,
-      hasToken: !!userToken
+      hasCurrentUser: !!currentUser
     });
     
-    if (currentSessionId && userToken) {
+    if (currentSessionId && currentUser) {
       // Use context-aware AI for session users (with session context)
       endpoint = `${API_BASE_URL}/api/enhanced/sessions/${currentSessionId}/ask-stream`;
       requestBody = { question };
       Logger.log(`✅ ROUTING ${currentUser?.role?.toUpperCase() || 'USER'} TO PERSONALIZED ENDPOINT:`, {
         role: currentUser?.role,
         sessionId: currentSessionId,
-        hasToken: !!userToken,
+        hasCurrentUser: !!currentUser,
         endpoint: endpoint
       });
     } else {
       // Use general AI for standalone users (no session context)
-      endpoint = '${API_BASE_URL}/api/ai/general/ask-stream';
+      endpoint = `${API_BASE_URL}/api/ai/general/ask-stream`;
       requestBody = { question };
       Logger.log(`🔄 ROUTING ${currentUser?.role?.toUpperCase() || 'USER'} TO GENERIC ENDPOINT:`, {
         role: currentUser?.role,
         reason: !currentSessionId ? 'No session' : 'No token',
         sessionId: currentSessionId,
-        hasToken: !!userToken,
+        hasCurrentUser: !!currentUser,
         endpoint: endpoint
       });
     }
@@ -10114,7 +10087,20 @@ function renderChatMessages(messages) {
 const messagesContainer = document.getElementById('lynkk-messages-container');
 if (!messagesContainer) return;
 
-if (!messages || messages.length === 0) {
+// Ensure messages is an array
+if (!messages) {
+  messagesContainer.innerHTML = '<p style="text-align: center; color: #6b7280; padding: 20px; font-size: 14px;">No messages yet. Start the conversation!</p>';
+  return;
+}
+
+// Handle case where messages is not an array
+if (!Array.isArray(messages)) {
+  Logger.warn('Messages is not an array:', messages);
+  messagesContainer.innerHTML = '<p style="text-align: center; color: #6b7280; padding: 20px; font-size: 14px;">Error loading messages. Please refresh.</p>';
+  return;
+}
+
+if (messages.length === 0) {
   messagesContainer.innerHTML = '<p style="text-align: center; color: #6b7280; padding: 20px; font-size: 14px;">No messages yet. Start the conversation!</p>';
   return;
 }
@@ -11054,8 +11040,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       hasUser: !!message.authState?.user
     });
     
+    const previousUser = currentUser;
     currentUser = message.authState?.isAuthenticated ? message.authState.user : null;
     Logger.log('✅ Auth state updated - currentUser:', currentUser);
+    
+    // Stop voice capture if user logs out
+    if (previousUser && !currentUser && isVoiceCapturing) {
+      Logger.log('🛑 User logged out - stopping voice capture');
+      stopVoiceCapture();
+    }
     
     // Update chat UI if it exists
     if (chatContainerCreated) {
@@ -11243,19 +11236,9 @@ window.testGeneralAI = async function() {
   Logger.log('🧪 Testing General AI Backend...');
   
   try {
-    // Get auth token if user is logged in (optional for general AI)
-    let userToken = null;
-    if (currentUser) {
-      const authResult = await new Promise((resolve) => {
-        chrome.storage.local.get(['authState'], (result) => {
-          resolve(result.authState?.token || null);
-        });
-      });
-      userToken = authResult;
-    }
     
     Logger.log('📤 Sending test question to General AI:', {
-      authenticated: !!userToken,
+      authenticated: !!currentUser,
       question: 'Hello, can you help me with a math problem?'
     });
     
