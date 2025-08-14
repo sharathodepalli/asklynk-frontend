@@ -4745,7 +4745,9 @@ function renderProfessorQuestionDashboard(container, sessionId) {
         }
 
         .lynkk-question-item:hover {
-            background-color: #f9fafb;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 24px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.08) !important;
+            border-color: #d4d8e8;
         }
 
         .lynkk-resolve-btn:hover {
@@ -5277,20 +5279,14 @@ function createQuestionItemHTML(question) {
       data-question-id="${question.id}"
       data-resolved="${isResolved}"
       class="lynkk-question-item"  
-      style="position: relative; margin-bottom: 16px; background-color: #e6f2ff; border-radius: 16px; 
-             box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 20px; display: flex; flex-direction: column; 
-             gap: 16px; width: calc(100% - 2px); max-width: 100%; margin-right: 5px; box-sizing: border-box;"
+      style="position: relative; margin-bottom: 18px; background: linear-gradient(145deg, #ffffff 0%, #fafbff 100%); border-radius: 18px; 
+             box-shadow: 0 4px 16px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.06); padding: 24px; display: flex; flex-direction: column; 
+             gap: 18px; width: calc(100% - 2px); max-width: 100%; margin-right: 5px; box-sizing: border-box; border: 1px solid #e8ecf7; transition: all 0.3s ease;"
   >
-          <!-- Top row with question and status dot -->
-          <div style="display: flex; align-items: flex-start; gap: 16px;">
-              <!-- Status dot with user initial -->
-              <div style="width: 32px; height: 32px; border-radius: 50%; background-color: #4f46e5; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 14px; flex-shrink: 0;">
-                  ${userInitial}
-              </div>
-              
-              <!-- Question content -->
-              <h3 style="font-size: 17px; font-weight: 600; color: #1e293b; margin: 0; line-height: 1.4;">
-                  "${content}"
+          <!-- Question content only -->
+          <div>
+              <h3 style="font-size: 16px; font-weight: 600; color: #1e293b; margin: 0; line-height: 1.5; letter-spacing: -0.01em; text-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                  ${content}
               </h3>
           </div>
           
@@ -5298,52 +5294,64 @@ function createQuestionItemHTML(question) {
           <div style="display: flex; justify-content: space-between; align-items: center;">
               <!-- Left side: User info -->
               <div style="display: flex; align-items: center; gap: 24px;">
-                  <!-- User identity with lock icon for anonymous -->
+                  <!-- User identity with proper icon for anonymous vs identified -->
                   <div style="display: flex; align-items: center; gap: 8px;">
                       ${isAnonymous ? 
-                          `<span style="display: flex; align-items: center; gap: 4px; color: #6b7280; font-size: 14px;">
-                              <span style="display: flex; align-items: center; justify-content: center; width: 16px; height: 16px;">🔒</span>
-                              <span style="color: #6b7280;">${escapeHTML(question.anonymous_name || 'Anonymous')}</span>
+                          `<span style="display: flex; align-items: center; gap: 6px; color: #6b7280; font-size: 12px;">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                              </svg>
+                              <span style="color: #6b7280; font-weight: 500;">${escapeHTML(question.anonymous_name || 'Anonymous')}</span>
                           </span>` : 
-                          `<span style="color: #6b7280; font-size: 14px;">
-                              ${escapeHTML(question.display_name || 'User')}
+                          `<span style="display: flex; align-items: center; gap: 6px; color: #6b7280; font-size: 12px;">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                              </svg>
+                              <span style="font-weight: 500;">${escapeHTML(question.display_name || 'User')}</span>
                           </span>`
                       }
                   </div>
                   
                   <!-- Time -->
-                  <div style="display: flex; align-items: center; gap: 12px; color: #6b7280; font-size: 14px;">
+                  <div style="display: flex; align-items: center; gap: 12px; color: #9ca3af; font-size: 10px;">
                       <span style="display: flex; align-items: center; gap: 4px;">
-                          <span style="display: flex; align-items: center; justify-content: center; width: 16px; height: 16px;">🕒</span>
-                          <span>${formattedTime}</span>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                          </svg>
+                          <span style="font-weight: 500;">${formattedTime}</span>
                       </span>
                   </div>
               </div>
               
               <!-- Middle: Voting controls -->
-              <div style="display: flex; align-items: center; gap: 12px;">
-                  <!-- Upvote button - FIXED: Using fixed stroke color for SVG -->
+              <div style="display: flex; align-items: center; gap: 8px;">
+                  <!-- Upvote button with vote count -->
                   <button class="lynkk-upvote-btn" data-question-id="${question.id}" 
                     style="background-color: #f8fafc; border: 1px solid #e2e8f0; cursor: pointer; 
-                          display: flex; align-items: center; padding: 8px; 
-                          border-radius: 8px; transition: all 0.2s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"
-                    onmouseover="this.style.backgroundColor='#eef2ff'; this.style.borderColor='#c7d2fe';" 
-                    onmouseout="this.style.backgroundColor='#f8fafc'; this.style.borderColor='#e2e8f0';">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                          <path d="M12 19V5M5 12l7-7 7 7"/>
+                          display: flex; align-items: center; gap: 6px; padding: 8px 12px; 
+                          border-radius: 10px; transition: all 0.2s ease; box-shadow: 0 2px 4px rgba(0,0,0,0.08);"
+                    onmouseover="this.style.backgroundColor='#eef2ff'; this.style.borderColor='#c7d2fe'; this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 8px rgba(0,0,0,0.12)';" 
+                    onmouseout="this.style.backgroundColor='#f8fafc'; this.style.borderColor='#e2e8f0'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.08)';">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M7 14l5-5 5 5"/>
                       </svg>
+                      <span style="font-size: 12px; font-weight: 600; color: #059669;">${question.upvotes || 0}</span>
                   </button>
                   
-                  <!-- Downvote button - FIXED: Using fixed stroke color for SVG -->
+                  <!-- Downvote button with vote count -->
                   <button class="lynkk-downvote-btn" data-question-id="${question.id}" 
                     style="background-color: #f8fafc; border: 1px solid #e2e8f0; cursor: pointer; 
-                          display: flex; align-items: center; padding: 8px; 
-                          border-radius: 8px; transition: all 0.2s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.05);"
-                    onmouseover="this.style.backgroundColor='#fef2f2'; this.style.borderColor='#fecaca';" 
-                    onmouseout="this.style.backgroundColor='#f8fafc'; this.style.borderColor='#e2e8f0';">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                          <path d="M12 5v14M5 12l7 7 7-7"/>
+                          display: flex; align-items: center; gap: 6px; padding: 8px 12px; 
+                          border-radius: 10px; transition: all 0.2s ease; box-shadow: 0 2px 4px rgba(0,0,0,0.08);"
+                    onmouseover="this.style.backgroundColor='#fef2f2'; this.style.borderColor='#fecaca'; this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 8px rgba(0,0,0,0.12)';" 
+                    onmouseout="this.style.backgroundColor='#f8fafc'; this.style.borderColor='#e2e8f0'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.08)';">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M17 10l-5 5-5-5"/>
                       </svg>
+                      <span style="font-size: 12px; font-weight: 600; color: #dc2626;">${question.downvotes || 0}</span>
                   </button>
               </div>
               
@@ -7053,6 +7061,11 @@ function addDashboardStyles() {
 
 // Function to load class questions for this session only
 
+// Throttling for questions loading
+let questionsLoadingInProgress = false;
+let lastQuestionsLoadTime = 0;
+const QUESTIONS_THROTTLE_MS = 2000; // 2 seconds between requests
+
 function loadClassQuestionsForSession(sessionId) {
   // Find the right container
   let container = document.getElementById('lynkk-class-questions');
@@ -7062,13 +7075,29 @@ function loadClassQuestionsForSession(sessionId) {
     return;
   }
   
+  // Throttle requests to prevent rate limiting
+  const currentTime = Date.now();
+  if (questionsLoadingInProgress) {
+    Logger.log('⏳ Questions request already in progress, skipping...');
+    return;
+  }
+  
+  if (currentTime - lastQuestionsLoadTime < QUESTIONS_THROTTLE_MS) {
+    Logger.log('⏳ Questions request throttled - too soon after last request');
+    return;
+  }
+  
+  questionsLoadingInProgress = true;
+  lastQuestionsLoadTime = currentTime;
+  
   Logger.log(`Loading class questions for session ${sessionId}`);
   
-  // Show loading indicator
+  // Show enhanced loading indicator
   container.innerHTML = `
-    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center;">
-      <div style="width: 24px; height: 24px; border: 2px solid #e2e8f0; border-top: 2px solid #4f46e5; border-radius: 50%; margin-bottom: 12px; animation: lynkk-spin 1s linear infinite;"></div>
-      <p style="font-size: 13px; color: #64748b;">Loading questions from the class...</p>
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; text-align: center;">
+      <div style="width: 32px; height: 32px; border: 3px solid #e2e8f0; border-top: 3px solid #6366f1; border-radius: 50%; margin-bottom: 16px; animation: lynkk-spin 1s linear infinite;"></div>
+      <p style="font-size: 14px; color: #374151; font-weight: 500;">Loading classroom questions...</p>
+      <p style="font-size: 12px; color: #6b7280; margin-top: 4px;">Preparing dashboard for professors</p>
     </div>
   `;
   
@@ -7095,61 +7124,195 @@ function loadClassQuestionsForSession(sessionId) {
       
       Logger.log(`Found ${questions.length} class questions`);
       
-      // Handle empty questions
-      if (!questions || questions.length === 0) {
-        container.innerHTML = `
-          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 150px; text-align: center; color: #64748b;">
-            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-              <line x1="9" y1="10" x2="15" y2="10"></line>
-              <line x1="12" y1="7" x2="12" y2="13"></line>
-            </svg>
-            <p style="margin-top: 12px; font-size: 14px;">No questions have been asked yet</p>
-            <p style="margin-top: 4px; font-size: 12px;">Questions from other students will appear here</p>
-          </div>
-        `;
-        return;
-      }
-      
-      // Sort by date (newest first)
-      questions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-      
-      // Generate HTML for questions
-      let html = '';
-      
-      questions.forEach(question => {
-        const timeAgo = getTimeAgoString(new Date(question.created_at));
-        const resolvedClass = question.resolved ? 'resolved' : '';
+      // Get current user role to determine interface
+      chrome.storage.local.get(['authState'], (authResult) => {
+        const currentUser = authResult.authState?.user;
+        const isProfessor = currentUser?.role === 'professor';
         
-        // FIXED: Use display_name instead of anonymous_name
-        // This displays the correct name based on whether the question is anonymous or not
-        const isAnonymous = question.type === 'anonymous';
-        
-        // Use display_name field which comes from the database view
-        // If not available, fall back to sensible defaults
-        const displayName = question.display_name || (isAnonymous ? 'Anonymous' : 'Student');
-        
-        // Log for debugging
-        Logger.log(`Question: type=${question.type}, display_name=${question.display_name}, showing as=${displayName}`);
-        
-        html += `
-          <div class="lynkk-question-card ${resolvedClass}" style="margin-bottom: 10px; padding: 12px; background-color: ${question.resolved ? '#f0fdf4' : '#f8fafc'}; border-radius: 8px; border-left: 3px solid ${question.resolved ? '#10b981' : '#4f46e5'};">
-            <div class="lynkk-question-meta" style="display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 4px;">
-              <span>${displayName}</span>
-              <span>${timeAgo}</span>
+        // Handle empty questions
+        if (!questions || questions.length === 0) {
+          container.innerHTML = `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 24px; text-align: center; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); border-radius: 12px; border: 1px solid #e2e8f0;">
+              <div style="width: 64px; height: 64px; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  <path d="M13 8H7"></path>
+                  <path d="M17 12H7"></path>
+                </svg>
+              </div>
+              <h3 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 600; color: #1f2937;">Ready for Student Questions</h3>
+              <p style="margin: 0 0 4px 0; font-size: 14px; color: #6b7280;">Student questions will appear here in real-time</p>
+              <p style="margin: 0; font-size: 12px; color: #9ca3af;">${isProfessor ? 'Manage and respond to questions as they come in' : 'Questions from your classmates will be shown here'}</p>
             </div>
-            <div class="lynkk-question-content" style="font-size: 13px; color: #334155; line-height: 1.4; word-break: break-word;">
-              ${question.content}
+          `;
+          return;
+        }
+
+        // Sort questions by upvotes first, then by date
+        questions.sort((a, b) => {
+          const aVotes = (a.upvotes || 0);
+          const bVotes = (b.upvotes || 0);
+          if (aVotes !== bVotes) return bVotes - aVotes; // Higher votes first
+          return new Date(b.created_at) - new Date(a.created_at); // Then by newest
+        });
+
+        // Generate dashboard header with stats
+        const totalQuestions = questions.length;
+        const pendingQuestions = questions.filter(q => !q.resolved).length;
+        const resolvedQuestions = questions.filter(q => q.resolved).length;
+        const totalUpvotes = questions.reduce((sum, q) => sum + (q.upvotes || 0), 0);
+
+        let html = '';
+        
+        // Dashboard header for professors
+        if (isProfessor) {
+          html += `
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 16px; padding: 24px; margin-bottom: 24px; color: white; box-shadow: 0 6px 20px rgba(102, 126, 234, 0.25), 0 2px 6px rgba(0,0,0,0.1);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 style="margin: 0; font-size: 20px; font-weight: 700;">📊 Class Dashboard</h2>
+                <div style="display: flex; gap: 8px;">
+                  <button onclick="sortQuestions('votes')" style="padding: 6px 12px; background: rgba(255,255,255,0.2); border: none; border-radius: 6px; color: white; font-size: 12px; cursor: pointer; backdrop-filter: blur(10px);">Sort by Votes</button>
+                  <button onclick="sortQuestions('time')" style="padding: 6px 12px; background: rgba(255,255,255,0.2); border: none; border-radius: 6px; color: white; font-size: 12px; cursor: pointer; backdrop-filter: blur(10px);">Sort by Time</button>
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px;">
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 8px; text-align: center; backdrop-filter: blur(10px);">
+                  <div style="font-size: 24px; font-weight: 700;">${totalQuestions}</div>
+                  <div style="font-size: 12px; opacity: 0.9;">Total Questions</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 8px; text-align: center; backdrop-filter: blur(10px);">
+                  <div style="font-size: 24px; font-weight: 700; color: #fbbf24;">${pendingQuestions}</div>
+                  <div style="font-size: 12px; opacity: 0.9;">Pending</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 8px; text-align: center; backdrop-filter: blur(10px);">
+                  <div style="font-size: 24px; font-weight: 700; color: #10b981;">${resolvedQuestions}</div>
+                  <div style="font-size: 12px; opacity: 0.9;">Resolved</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 8px; text-align: center; backdrop-filter: blur(10px);">
+                  <div style="font-size: 24px; font-weight: 700; color: #f87171;">${totalUpvotes}</div>
+                  <div style="font-size: 12px; opacity: 0.9;">Total Votes</div>
+                </div>
+              </div>
             </div>
-            <div class="lynkk-question-status" style="display: flex; align-items: center; gap: 4px; font-size: 11px; margin-top: 6px; color: ${question.resolved ? '#059669' : '#4f46e5'};">
-              <span class="lynkk-status-dot ${resolvedClass}"></span>
-              <span>${question.resolved ? 'Answered' : 'Pending answer'}</span>
+          `;
+        }
+
+        // Questions list
+        questions.forEach((question, index) => {
+          const timeAgo = getTimeAgoString(new Date(question.created_at));
+          const isAnonymous = question.type === 'anonymous';
+          const displayName = question.display_name || (isAnonymous ? 'Anonymous Student' : 'Student');
+          const upvotes = question.upvotes || 0;
+          const downvotes = question.downvotes || 0;
+          const questionId = question.id;
+          
+          // Question priority indicator
+          let priorityColor = '#6b7280';
+          let priorityLabel = 'Normal';
+          if (upvotes >= 5) {
+            priorityColor = '#dc2626';
+            priorityLabel = 'High Priority';
+          } else if (upvotes >= 2) {
+            priorityColor = '#f59e0b';
+            priorityLabel = 'Medium Priority';
+          }
+
+          html += `
+            <div class="question-card" data-question-id="${questionId}" style="margin-bottom: 16px; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid ${question.resolved ? '#10b981' : '#e5e7eb'}; overflow: hidden; transition: all 0.3s ease;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)'">
+              
+              <!-- Question Header -->
+              <div style="padding: 16px 20px 12px 20px; border-bottom: 1px solid #f3f4f6; background: ${question.resolved ? 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)' : 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)'};">
+                <div style="display: flex; justify-content: between; align-items: flex-start; gap: 12px;">
+                  <div style="flex: 1;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                      <div>
+                        <div style="font-weight: 600; color: #1f2937; font-size: 14px;">${displayName}</div>
+                        <div style="font-size: 10px; color: #9ca3af; font-weight: 500;">${timeAgo}</div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- Priority & Status -->
+                  <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                    <div style="display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: rgba(255,255,255,0.8); border-radius: 6px; font-size: 11px; font-weight: 600; color: ${priorityColor};">
+                      <div style="width: 6px; height: 6px; background: ${priorityColor}; border-radius: 50%;"></div>
+                      ${priorityLabel}
+                    </div>
+                    ${question.resolved ? 
+                      '<div style="padding: 4px 8px; background: #10b981; color: white; border-radius: 6px; font-size: 11px; font-weight: 600;">✓ Resolved</div>' :
+                      '<div style="padding: 4px 8px; background: #f59e0b; color: white; border-radius: 6px; font-size: 11px; font-weight: 600;">⏳ Pending</div>'
+                    }
+                  </div>
+                </div>
+              </div>
+
+              <!-- Question Content -->
+              <div style="padding: 20px;">
+                <!-- Row 1: Question Content -->
+                <div style="font-size: 15px; line-height: 1.6; color: #1f2937; margin-bottom: 16px; font-weight: 400;">
+                  ${question.content}
+                </div>
+
+                <!-- Row 2: User & Time (Vertical Stack) -->
+                <div style="margin-bottom: 16px;">
+                  <div style="display: flex; align-items: center; gap: 6px; color: #6b7280; font-size: 12px; margin-bottom: 6px;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                    <span style="font-weight: 500;">${displayName}</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px; color: #9ca3af; font-size: 11px;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    <span style="font-weight: 500;">${timeAgo}</span>
+                  </div>
+                </div>
+
+                <!-- Row 3: Action Bar (Always Visible) -->
+                <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 12px; border-top: 1px solid #f3f4f6;">
+                  
+                  <!-- Left: Voting -->
+                  <div style="display: flex; align-items: center; background: #f8fafc; border-radius: 8px; padding: 4px; border: 1px solid #e2e8f0;">
+                    <button onclick="voteQuestion('${questionId}', 'up')" style="display: flex; align-items: center; gap: 4px; padding: 6px 8px; border: none; background: transparent; border-radius: 6px; cursor: ${isProfessor ? 'not-allowed' : 'pointer'}; transition: all 0.2s; font-size: 12px; font-weight: 600; color: #059669;" ${isProfessor ? 'disabled' : ''} onmouseover="if(!this.disabled) this.style.background='#f0fdf4'" onmouseout="if(!this.disabled) this.style.background='transparent'">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M7 14l5-5 5 5"></path>
+                      </svg>
+                      ${upvotes}
+                    </button>
+                    <div style="width: 1px; height: 20px; background: #e5e7eb;"></div>
+                    <button onclick="voteQuestion('${questionId}', 'down')" style="display: flex; align-items: center; gap: 4px; padding: 6px 8px; border: none; background: transparent; border-radius: 6px; cursor: ${isProfessor ? 'not-allowed' : 'pointer'}; transition: all 0.2s; font-size: 12px; font-weight: 600; color: #dc2626;" ${isProfessor ? 'disabled' : ''} onmouseover="if(!this.disabled) this.style.background='#fef2f2'" onmouseout="if(!this.disabled) this.style.background='transparent'">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M17 10l-5 5-5-5"></path>
+                      </svg>
+                      ${downvotes}
+                    </button>
+                  </div>
+
+                  <!-- Right: Professor Actions (Always Visible) -->
+                  ${isProfessor ? `
+                    <div style="display: flex; gap: 6px;">
+                      <button onclick="markAsAnswered('${questionId}')" style="padding: 6px 12px; background: ${question.resolved ? '#e5e7eb' : '#10b981'}; color: white; border: none; border-radius: 20px; font-size: 11px; font-weight: 500; cursor: ${question.resolved ? 'not-allowed' : 'pointer'}; transition: all 0.2s;" ${question.resolved ? 'disabled' : ''} onmouseover="if(!this.disabled) this.style.transform='scale(1.05)'" onmouseout="if(!this.disabled) this.style.transform='scale(1)'">
+                        ${question.resolved ? '✓' : '✓ Mark'}
+                      </button>
+                      <button onclick="pinQuestion('${questionId}')" style="padding: 6px 12px; background: #f59e0b; color: white; border: none; border-radius: 20px; font-size: 11px; font-weight: 500; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                        📌
+                      </button>
+                      <button onclick="respondToQuestion('${questionId}')" style="padding: 6px 12px; background: #6366f1; color: white; border: none; border-radius: 20px; font-size: 11px; font-weight: 500; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                        ?
+                      </button>
+                    </div>
+                  ` : '<span style="font-size: 10px; color: #9ca3af;">Tap arrows to vote</span>'}
+                </div>
+              </div>
             </div>
-          </div>
-        `;
+          `;
+        });
+
+        container.innerHTML = html;
       });
-      
-      container.innerHTML = html;
       
     } catch (error) {
       Logger.error('Error loading class questions:', error);
@@ -7166,10 +7329,209 @@ function loadClassQuestionsForSession(sessionId) {
         loadClassQuestionsForSession(sessionId);
       });
     }
+    
+    // Reset throttling flag when request completes
+    finally {
+      questionsLoadingInProgress = false;
+    }
   });
 }
 
+// Action functions for the professional questions dashboard
+window.voteQuestion = function(questionId, voteType) {
+  const sessionId = window.currentSessionId;
+  if (!sessionId) {
+    Logger.error('No active session found for voting');
+    return;
+  }
 
+  Logger.log(`Voting ${voteType} on question ${questionId}`);
+  
+  // Visual feedback
+  const button = event.target.closest('button');
+  const originalBg = button.style.background;
+  button.style.background = voteType === 'up' ? '#10b981' : '#dc2626';
+  button.style.transform = 'scale(0.95)';
+  
+  setTimeout(() => {
+    button.style.background = originalBg;
+    button.style.transform = 'scale(1)';
+  }, 200);
+
+  // API call to vote
+  chrome.runtime.sendMessage({
+    type: 'API_CALL',
+    url: `${API_BASE_URL}/api/questions/${questionId}/vote`,
+    method: 'POST',
+    body: { vote_type: voteType }
+  }, (response) => {
+    if (response && response.ok) {
+      Logger.log('Vote recorded successfully');
+      // Refresh the questions to show updated counts
+      setTimeout(() => loadClassQuestionsForSession(sessionId), 500);
+    } else {
+      Logger.error('Failed to record vote:', response);
+    }
+  });
+};
+
+window.markAsAnswered = function(questionId) {
+  const sessionId = window.currentSessionId;
+  if (!sessionId) return;
+
+  Logger.log(`Marking question ${questionId} as answered`);
+  
+  // Visual feedback
+  const button = event.target.closest('button');
+  const originalText = button.innerHTML;
+  button.innerHTML = '⏳ Updating...';
+  button.disabled = true;
+
+  chrome.runtime.sendMessage({
+    type: 'API_CALL',
+    url: `${API_BASE_URL}/api/questions/${questionId}/resolve`,
+    method: 'POST',
+    body: { resolved: true }
+  }, (response) => {
+    if (response && response.ok) {
+      Logger.log('Question marked as answered');
+      button.innerHTML = '✓ Answered';
+      button.style.background = '#6b7280';
+      button.style.cursor = 'not-allowed';
+      
+      // Show success notification
+      showNotification('Question marked as answered successfully!', 'success');
+      
+      // Refresh questions after short delay
+      setTimeout(() => loadClassQuestionsForSession(sessionId), 1000);
+    } else {
+      Logger.error('Failed to mark question as answered:', response);
+      button.innerHTML = originalText;
+      button.disabled = false;
+      showNotification('Failed to mark question as answered', 'error');
+    }
+  });
+};
+
+window.pinQuestion = function(questionId) {
+  Logger.log(`Pinning question ${questionId}`);
+  
+  // Visual feedback
+  const button = event.target.closest('button');
+  const originalText = button.innerHTML;
+  button.innerHTML = '📌 Pinning...';
+  
+  setTimeout(() => {
+    button.innerHTML = '📌 Pinned';
+    button.style.background = 'linear-gradient(135deg, #059669 0%, #047857 100%)';
+    showNotification('Question pinned to top!', 'success');
+  }, 500);
+};
+
+window.respondToQuestion = function(questionId) {
+  Logger.log(`Opening response dialog for question ${questionId}`);
+  
+  // Find the question content
+  const questionCard = document.querySelector(`[data-question-id="${questionId}"]`);
+  const questionContent = questionCard.querySelector('div[style*="font-size: 15px"]').textContent;
+  
+  // Create response modal
+  const modal = document.createElement('div');
+  modal.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+    background: rgba(0,0,0,0.5); display: flex; align-items: center; 
+    justify-content: center; z-index: 10000; backdrop-filter: blur(4px);
+  `;
+  
+  modal.innerHTML = `
+    <div style="background: white; border-radius: 16px; padding: 24px; max-width: 500px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.2);">
+      <h3 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #1f2937;">Respond to Question</h3>
+      <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 16px; border-left: 4px solid #6366f1;">
+        <p style="margin: 0; font-size: 14px; color: #374151; font-style: italic;">"${questionContent}"</p>
+      </div>
+      <textarea id="response-text" placeholder="Write your response here..." style="width: 100%; height: 100px; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px; resize: vertical; font-family: -apple-system, BlinkMacSystemFont, sans-serif; line-height: 1.5;"></textarea>
+      <div style="display: flex; gap: 12px; margin-top: 16px; justify-content: flex-end;">
+        <button onclick="this.closest('div[style*=\"position: fixed\"]').remove()" style="padding: 8px 16px; border: 2px solid #e5e7eb; background: white; color: #374151; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s;">Cancel</button>
+        <button onclick="sendQuestionResponse('${questionId}', document.getElementById('response-text').value); this.closest('div[style*=\"position: fixed\"]').remove();" style="padding: 8px 16px; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);">Send Response</button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  document.getElementById('response-text').focus();
+};
+
+window.sendQuestionResponse = function(questionId, response) {
+  if (!response.trim()) {
+    showNotification('Please enter a response', 'error');
+    return;
+  }
+  
+  Logger.log(`Sending response to question ${questionId}:`, response);
+  
+  chrome.runtime.sendMessage({
+    type: 'API_CALL',
+    url: `${API_BASE_URL}/api/questions/${questionId}/respond`,
+    method: 'POST',
+    body: { response: response.trim() }
+  }, (result) => {
+    if (result && result.ok) {
+      showNotification('Response sent successfully!', 'success');
+      markAsAnswered(questionId);
+    } else {
+      showNotification('Failed to send response', 'error');
+    }
+  });
+};
+
+window.sortQuestions = function(sortType) {
+  const container = document.getElementById('lynkk-class-questions');
+  const questionCards = Array.from(container.querySelectorAll('.question-card'));
+  
+  questionCards.sort((a, b) => {
+    if (sortType === 'votes') {
+      const aVotes = parseInt(a.querySelector('button[onclick*="up"]').textContent.match(/\d+/)?.[0] || '0');
+      const bVotes = parseInt(b.querySelector('button[onclick*="up"]').textContent.match(/\d+/)?.[0] || '0');
+      return bVotes - aVotes;
+    } else {
+      // Sort by time - would need timestamp data
+      return 0; // Placeholder for now
+    }
+  });
+  
+  // Re-append sorted cards
+  const dashboard = container.querySelector('div[style*="linear-gradient(135deg, #667eea"]');
+  questionCards.forEach(card => container.appendChild(card));
+  if (dashboard) container.insertBefore(dashboard, container.firstChild);
+  
+  showNotification(`Questions sorted by ${sortType}`, 'success');
+};
+
+// Notification function
+function showNotification(message, type = 'info') {
+  const notification = document.createElement('div');
+  notification.style.cssText = `
+    position: fixed; top: 20px; right: 20px; padding: 16px 20px;
+    background: ${type === 'success' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 
+               type === 'error' ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)' : 
+               'linear-gradient(135deg, #6366f1 0%, #4f46e5 100)'};
+    color: white; border-radius: 8px; font-weight: 600; z-index: 10001;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2); font-size: 14px;
+    transform: translateX(100%); transition: transform 0.3s ease;
+  `;
+  notification.textContent = message;
+  
+  document.body.appendChild(notification);
+  
+  // Animate in
+  setTimeout(() => notification.style.transform = 'translateX(0)', 100);
+  
+  // Remove after 3 seconds
+  setTimeout(() => {
+    notification.style.transform = 'translateX(100%)';
+    setTimeout(() => notification.remove(), 300);
+  }, 3000);
+}
 
 // Function to load student's questions for this session only
 
@@ -7259,36 +7621,36 @@ function loadStudentQuestionsForSession(sessionId) {
         const statusBgColor = question.resolved ? '#f0fdf4' : '#f8fafc';
         const borderColor = question.resolved ? '#10b981' : '#6366f1';
         
-        // Create HTML for each question with enhanced styling
+        // Create HTML for each question with clean vertical layout
         html += `
           <div class="lynkk-my-question-card" style="position: relative; margin-bottom: 16px; padding: 16px; background-color: ${statusBgColor}; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 2px 5px rgba(0,0,0,0.03); transition: all 0.2s ease;">
-            <!-- Card header with user info and time -->
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <!-- User avatar/icon -->
-                <div style="width: 28px; height: 28px; border-radius: 50%; background-color: ${isAnonymous ? '#8b5cf6' : '#3b82f6'}; display: flex; justify-content: center; align-items: center; color: white; font-size: 12px; font-weight: 600;">
-                  ${isAnonymous ? 'A' : displayName.charAt(0).toUpperCase()}
-                </div>
-                <!-- Username and badge -->
-                <div>
-                  <span style="font-size: 14px; font-weight: 500; color: #334155;">${displayName}</span>
-                  <span style="margin-left: 6px; font-size: 11px; padding: 2px 6px; background-color: ${isAnonymous ? '#ddd6fe' : '#bfdbfe'}; color: ${isAnonymous ? '#5b21b6' : '#1e40af'}; border-radius: 4px; font-weight: 500;">
-                    ${isAnonymous ? 'Anonymous' : 'Identified'}
-                  </span>
-                </div>
+            
+            <!-- Row 1: Question Content -->
+            <div style="font-size: 14px; color: #1e293b; line-height: 1.5; margin-bottom: 12px; padding: 12px; background-color: white; border-radius: 8px; border-left: 3px solid ${borderColor}; word-break: break-word;">
+              ${question.content}
+            </div>
+
+            <!-- Row 2: User & Time -->
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+              <div style="display: flex; align-items: center; gap: 6px; color: #6b7280; font-size: 12px;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  ${isAnonymous ? 
+                    '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>' :
+                    '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>'
+                  }
+                </svg>
+                <span style="font-weight: 500;">${displayName}</span>
+                <span style="font-size: 11px; padding: 2px 6px; background-color: ${isAnonymous ? '#ddd6fe' : '#bfdbfe'}; color: ${isAnonymous ? '#5b21b6' : '#1e40af'}; border-radius: 4px; font-weight: 500;">
+                  ${isAnonymous ? 'Anonymous' : 'Identified'}
+                </span>
               </div>
-              <span style="font-size: 12px; color: #64748b; display: flex; align-items: center; gap: 4px;">
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <div style="display: flex; align-items: center; gap: 4px; color: #9ca3af; font-size: 10px;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <circle cx="12" cy="12" r="10"></circle>
                   <polyline points="12 6 12 12 16 14"></polyline>
                 </svg>
-                ${timeAgo}
-              </span>
-            </div>
-            
-            <!-- Question content with better typography -->
-            <div style="font-size: 14px; color: #1e293b; line-height: 1.5; margin-bottom: 12px; padding: 12px; background-color: white; border-radius: 8px; border-left: 3px solid ${borderColor}; word-break: break-word;">
-              ${question.content}
+                <span style="font-weight: 500;">${timeAgo}</span>
+              </div>
             </div>
             
             <!-- Status indicator -->
@@ -7657,7 +8019,7 @@ function loadRecentQuestionsPreview(sessionId) {
           <div class="lynkk-question-card ${question.resolved ? 'resolved' : ''}" style="margin-bottom: 6px; padding: 8px;">
             <div class="lynkk-question-meta">
               <span>${question.anonymous_name || 'Anonymous'}</span>
-              <span>${timeAgo}</span>
+              <span style="font-size: 10px; color: #9ca3af; font-weight: 500;">${timeAgo}</span>
             </div>
             <div class="lynkk-question-content" style="font-size: 11px;">${question.content}</div>
           </div>
@@ -7783,15 +8145,18 @@ function loadClassQuestions(sessionId, targetContainer) {
         
         html += `
           <div class="lynkk-class-question" style="padding: 8px; border-radius: 6px; background-color: ${index % 2 === 0 ? '#f9fafb' : 'white'}; margin-bottom: 6px; border-left: 3px solid ${borderColor}; ${question.resolved ? 'opacity: 0.7;' : ''}">
-            <div style="font-size: 12px; color: #1f2937; margin-bottom: 4px; word-break: break-word;">
+            <!-- Row 1: Question Content -->
+            <div style="font-size: 12px; color: #1f2937; margin-bottom: 8px; word-break: break-word;">
               ${question.content}
             </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-size: 10px; color: #6b7280; display: flex; align-items: center;">
+            
+            <!-- Row 2: User Info (Vertical Stack) -->
+            <div style="margin-bottom: 6px;">
+              <div style="font-size: 10px; color: #6b7280; display: flex; align-items: center; margin-bottom: 2px;">
                 ${displayName}
                 ${badgeHtml}
-              </span>
-              <span style="font-size: 10px; color: #6b7280; display: flex; align-items: center; gap: 4px;">
+              </div>
+              <div style="font-size: 10px; color: #6b7280; display: flex; align-items: center; gap: 4px;">
                 ${question.resolved ? `
                 <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
@@ -7804,7 +8169,7 @@ function loadClassQuestions(sessionId, targetContainer) {
                   <polyline points="12 6 12 12 16 14"></polyline>
                 </svg>
                 ${timeAgo}
-              </span>
+              </div>
             </div>
           </div>
         `;
@@ -8238,8 +8603,11 @@ async function sendContextAwareAIMessage(question = null) {
     content: messageText
   });
   
-  // Add AI message with streaming
+  // Add AI message with immediate "thinking" state for instant feedback
   const aiMessageId = addContextAwareAIMessage('', false, true);
+  
+  // Show immediate thinking state (ChatGPT-like responsiveness)
+  updateContextAwareAIMessage(aiMessageId, 'Thinking...', false);
   
   try {
     await streamContextAwareAIResponse(messageText, aiMessageId);
@@ -8270,36 +8638,60 @@ function addContextAwareAIMessage(content, isUser, isStreaming = false) {
   Logger.log('🆕 Creating new AI message:', messageId, 'isUser:', isUser, 'content:', content);
   const messageEl = document.createElement('div');
   messageEl.id = messageId;
+  messageEl.className = 'message-container';
   
   const aiMessages = document.getElementById('lynkk-ai-messages');
   Logger.log('📦 AI messages container found:', !!aiMessages);
   
   if (isUser) {
     messageEl.innerHTML = `
-      <div style="padding: 16px 20px; border-bottom: 1px solid #f0f0f0;">
-        <div style="max-width: 768px; margin: 0 auto; display: flex; gap: 12px;">
-          <div style="width: 30px; height: 30px; background: #19c37d; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: white; flex-shrink: 0;">
-            You
+      <div style="padding: 20px 24px; background: #ffffff; border-bottom: 1px solid rgba(0,0,0,0.05);">
+        <div style="max-width: 768px; margin: 0 auto; display: flex; gap: 16px; align-items: flex-start;">
+          <div style="width: 36px; height: 36px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 600; color: white; flex-shrink: 0; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);">
+            👤
           </div>
-          <div style="flex: 1; color: #202123; font-size: 14px; line-height: 1.5; padding-top: 4px;">
-            ${content}
+          <div style="flex: 1; margin-top: 2px;">
+            <div style="font-size: 12px; font-weight: 600; color: #2563eb; margin-bottom: 6px; letter-spacing: 0.5px;">
+              You
+            </div>
+            <div style="color: #1f2937; font-size: 15px; line-height: 1.7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+              ${content}
+            </div>
           </div>
         </div>
       </div>
     `;
   } else {
     messageEl.innerHTML = `
-      <div style="padding: 16px 20px; background: #f7f7f8; border-bottom: 1px solid #f0f0f0;">
-        <div style="max-width: 768px; margin: 0 auto; display: flex; gap: 12px;">
-          <div style="width: 30px; height: 30px; background: #202123; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: white; flex-shrink: 0;">
-            🎓
+      <div style="padding: 20px 24px; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); border-bottom: 1px solid rgba(0,0,0,0.05); position: relative;">
+        <div style="max-width: 768px; margin: 0 auto; display: flex; gap: 16px; align-items: flex-start;">
+          <div style="width: 36px; height: 36px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 600; color: white; flex-shrink: 0; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);">
+            🤖
           </div>
-          <div style="flex: 1;">
-            <div id="ctx-content-${messageId}" style="color: #202123; font-size: 14px; line-height: 1.5; padding-top: 4px;">
-              ${content || 'Thinking...'}
+          <div style="flex: 1; margin-top: 2px;">
+            <div style="font-size: 12px; font-weight: 600; color: #059669; margin-bottom: 6px; letter-spacing: 0.5px;">
+              AI Assistant
+            </div>
+            <div id="ctx-content-${messageId}" style="color: #1f2937; font-size: 15px; line-height: 1.7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin-bottom: 12px;">
+              ${content || '<span class="thinking-dots" style="color: #6b7280; font-style: italic;">Thinking<span class="dots">...</span></span>'}
+            </div>
+            <div class="message-actions" style="display: flex; gap: 8px; opacity: 0; transition: opacity 0.2s ease;">
+              <button class="action-btn copy-btn" onclick="copyToClipboard('${messageId}')" style="padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: white; color: #6b7280; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s ease;" onmouseover="this.style.background='#f9fafb'; this.style.color='#374151'" onmouseout="this.style.background='white'; this.style.color='#6b7280'">
+                📋 Copy
+              </button>
+              <button class="action-btn regenerate-btn" onclick="regenerateResponse('${messageId}')" style="padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: white; color: #6b7280; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s ease;" onmouseover="this.style.background='#f9fafb'; this.style.color='#374151'" onmouseout="this.style.background='white'; this.style.color='#6b7280'">
+                🔄 Regenerate
+              </button>
+              <button class="action-btn like-btn" onclick="likeResponse('${messageId}')" style="padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: white; color: #6b7280; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s ease;" onmouseover="this.style.background='#f0fdf4'; this.style.color='#059669'; this.style.borderColor='#10b981'" onmouseout="this.style.background='white'; this.style.color='#6b7280'; this.style.borderColor='#d1d5db'">
+                👍 
+              </button>
+              <button class="action-btn dislike-btn" onclick="dislikeResponse('${messageId}')" style="padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: white; color: #6b7280; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s ease;" onmouseover="this.style.background='#fef2f2'; this.style.color='#dc2626'; this.style.borderColor='#f87171'" onmouseout="this.style.background='white'; this.style.color='#6b7280'; this.style.borderColor='#d1d5db'">
+                👎
+              </button>
             </div>
           </div>
         </div>
+        <div style="position: absolute; left: 0; top: 0; width: 3px; height: 100%; background: linear-gradient(180deg, #10b981 0%, #059669 100%); opacity: 0.6;"></div>
       </div>
     `;
     Logger.log('🎯 Created AI message element with content ID:', `ctx-content-${messageId}`);
@@ -8311,6 +8703,105 @@ function addContextAwareAIMessage(content, isUser, isStreaming = false) {
   
   return messageId;
 }
+
+// Action button functions
+window.copyToClipboard = function(messageId) {
+  const contentEl = document.getElementById(`ctx-content-${messageId}`);
+  if (contentEl) {
+    const text = contentEl.innerText || contentEl.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      // Show success feedback
+      const btn = event.target.closest('.copy-btn');
+      const originalText = btn.innerHTML;
+      btn.innerHTML = '✅ Copied!';
+      btn.style.background = '#f0fdf4';
+      btn.style.color = '#059669';
+      setTimeout(() => {
+        btn.innerHTML = originalText;
+        btn.style.background = 'white';
+        btn.style.color = '#6b7280';
+      }, 2000);
+    });
+  }
+};
+
+window.regenerateResponse = function(messageId) {
+  // Find the user message that triggered this AI response
+  const messages = document.querySelectorAll('.message-container');
+  let userMessage = null;
+  let found = false;
+  
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].id === messageId) {
+      found = true;
+    } else if (found && messages[i].querySelector('.action-btn')) {
+      // This is a user message before the AI response
+      userMessage = messages[i].querySelector('[style*="color: #1f2937"]')?.textContent;
+      break;
+    }
+  }
+  
+  if (userMessage) {
+    // Show loading in the AI message
+    const contentEl = document.getElementById(`ctx-content-${messageId}`);
+    if (contentEl) {
+      contentEl.innerHTML = '<span class="thinking-dots" style="color: #6b7280; font-style: italic;">Regenerating<span class="dots">...</span></span>';
+      
+      // Trigger regeneration
+      sendContextAwareAIMessage(userMessage.trim());
+    }
+  }
+};
+
+window.likeResponse = function(messageId) {
+  const btn = event.target.closest('.like-btn');
+  const isLiked = btn.classList.contains('liked');
+  
+  if (isLiked) {
+    btn.classList.remove('liked');
+    btn.innerHTML = '👍';
+    btn.style.background = 'white';
+    btn.style.color = '#6b7280';
+  } else {
+    btn.classList.add('liked');
+    btn.innerHTML = '👍 Liked';
+    btn.style.background = '#f0fdf4';
+    btn.style.color = '#059669';
+    btn.style.borderColor = '#10b981';
+    
+    // Remove dislike if active
+    const dislikeBtn = btn.parentElement.querySelector('.dislike-btn');
+    dislikeBtn.classList.remove('disliked');
+    dislikeBtn.innerHTML = '👎';
+    dislikeBtn.style.background = 'white';
+    dislikeBtn.style.color = '#6b7280';
+  }
+};
+
+window.dislikeResponse = function(messageId) {
+  const btn = event.target.closest('.dislike-btn');
+  const isDisliked = btn.classList.contains('disliked');
+  
+  if (isDisliked) {
+    btn.classList.remove('disliked');
+    btn.innerHTML = '👎';
+    btn.style.background = 'white';
+    btn.style.color = '#6b7280';
+  } else {
+    btn.classList.add('disliked');
+    btn.innerHTML = '👎 Disliked';
+    btn.style.background = '#fef2f2';
+    btn.style.color = '#dc2626';
+    btn.style.borderColor = '#f87171';
+    
+    // Remove like if active
+    const likeBtn = btn.parentElement.querySelector('.like-btn');
+    likeBtn.classList.remove('liked');
+    likeBtn.innerHTML = '👍';
+    likeBtn.style.background = 'white';
+    likeBtn.style.color = '#6b7280';
+  }
+};
 
 // Format AI content with proper line breaks and markdown-like styling  
 function formatAIContent(content) {
@@ -8324,20 +8815,195 @@ function formatAIContent(content) {
     .trim();
 }
 
-// Update context-aware AI message content
-function updateContextAwareAIMessage(messageId, content, isComplete = true) {
-  Logger.log('📝 Updating AI message:', messageId, 'Content length:', content.length, 'Complete:', isComplete);
+// Global variables to track streaming state
+const streamingStates = new Map();
+
+// Update context-aware AI message with typewriter effect
+function updateContextAwareAIMessage(messageId, newContent, isComplete = true) {
+  Logger.log('📝 Updating AI message:', messageId, 'Content length:', newContent.length, 'Complete:', isComplete);
+  
   const contentEl = document.getElementById(`ctx-content-${messageId}`);
-  if (contentEl) {
-    const formattedContent = formatAIContent(content);
-    contentEl.innerHTML = formattedContent;
-    
-    const aiMessages = document.getElementById('lynkk-ai-messages');
-    aiMessages.scrollTop = aiMessages.scrollHeight;
-    Logger.log('✅ UI updated successfully');
-  } else {
+  if (!contentEl) {
     Logger.warn('⚠️ Could not find content element:', `ctx-content-${messageId}`);
+    return;
   }
+
+  // Initialize streaming state for this message
+  if (!streamingStates.has(messageId)) {
+    streamingStates.set(messageId, {
+      currentText: '',
+      targetText: '',
+      isTyping: false,
+      typewriterInterval: null
+    });
+  }
+
+  const state = streamingStates.get(messageId);
+  state.targetText = newContent;
+
+  // Add typing cursor CSS if not already present
+  if (!isComplete && !document.getElementById('typing-cursor-style')) {
+    const style = document.createElement('style');
+    style.id = 'typing-cursor-style';
+    style.textContent = `
+      .typing-cursor {
+        animation: cursor-blink 1.2s ease-in-out infinite;
+        color: #10b981;
+        font-weight: 600;
+        margin-left: 1px;
+      }
+      @keyframes cursor-blink {
+        0%, 45% { opacity: 1; }
+        50%, 95% { opacity: 0; }
+        100% { opacity: 1; }
+      }
+      .ai-response-streaming {
+        transition: all 0.08s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .thinking-dots .dots {
+        animation: thinking-pulse 1.8s ease-in-out infinite;
+      }
+      @keyframes thinking-pulse {
+        0%, 20% { opacity: 0.3; transform: scale(1); }
+        25%, 45% { opacity: 0.7; transform: scale(1.05); }
+        50%, 70% { opacity: 1; transform: scale(1.1); }
+        75%, 95% { opacity: 0.7; transform: scale(1.05); }
+        100% { opacity: 0.3; transform: scale(1); }
+      }
+      .thinking-dots {
+        color: #6b7280;
+        font-style: italic;
+        font-weight: 500;
+      }
+      
+      /* Enhanced message animations */
+      .message-container {
+        animation: message-slide-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      @keyframes message-slide-in {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      
+      /* Message actions on hover */
+      .message-container:hover .message-actions {
+        opacity: 1 !important;
+      }
+      
+      /* Improved code blocks */
+      .code-block {
+        background: #1f2937;
+        color: #f9fafb;
+        padding: 16px;
+        border-radius: 8px;
+        font-family: 'Monaco', 'Menlo', monospace;
+        font-size: 14px;
+        line-height: 1.5;
+        margin: 12px 0;
+        position: relative;
+        border-left: 3px solid #10b981;
+      }
+      
+      /* Enhanced scrollbar */
+      #lynkk-ai-messages::-webkit-scrollbar {
+        width: 6px;
+      }
+      #lynkk-ai-messages::-webkit-scrollbar-track {
+        background: #f1f5f9;
+      }
+      #lynkk-ai-messages::-webkit-scrollbar-thumb {
+        background: linear-gradient(180deg, #10b981, #059669);
+        border-radius: 3px;
+      }
+      #lynkk-ai-messages::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(180deg, #059669, #047857);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Start typewriter effect if not already typing
+  if (!state.isTyping && state.currentText !== state.targetText) {
+    startTypewriterEffect(messageId, isComplete);
+  } else if (isComplete) {
+    // Stop any ongoing typing and show final text immediately
+    if (state.typewriterInterval) {
+      clearInterval(state.typewriterInterval);
+      state.typewriterInterval = null;
+    }
+    state.isTyping = false;
+    state.currentText = state.targetText;
+    
+    const formattedContent = formatAIContent(state.currentText);
+    contentEl.innerHTML = formattedContent; // No cursor when complete
+    contentEl.classList.remove('ai-response-streaming');
+    
+    streamingStates.delete(messageId);
+  }
+
+  // Auto-scroll
+  const aiMessages = document.getElementById('lynkk-ai-messages');
+  if (aiMessages) {
+    aiMessages.scrollTop = aiMessages.scrollHeight;
+  }
+  
+  Logger.log('✅ UI updated successfully');
+}
+
+// Typewriter effect function
+function startTypewriterEffect(messageId, isComplete) {
+  const state = streamingStates.get(messageId);
+  if (!state) return;
+
+  const contentEl = document.getElementById(`ctx-content-${messageId}`);
+  if (!contentEl) return;
+
+  state.isTyping = true;
+  contentEl.classList.add('ai-response-streaming');
+
+  // Clear any existing interval
+  if (state.typewriterInterval) {
+    clearInterval(state.typewriterInterval);
+  }
+
+  // Start typewriter effect
+  state.typewriterInterval = setInterval(() => {
+    if (state.currentText.length < state.targetText.length) {
+      // Add next character(s) - add multiple chars for faster typing
+      const charsToAdd = Math.min(3, state.targetText.length - state.currentText.length);
+      state.currentText = state.targetText.substring(0, state.currentText.length + charsToAdd);
+      
+      const formattedContent = formatAIContent(state.currentText);
+      const displayContent = formattedContent + '<span class="typing-cursor">|</span>';
+      contentEl.innerHTML = displayContent;
+
+      // Auto-scroll
+      const aiMessages = document.getElementById('lynkk-ai-messages');
+      if (aiMessages) {
+        aiMessages.scrollTop = aiMessages.scrollHeight;
+      }
+    } else {
+      // Typing caught up to target
+      state.isTyping = false;
+      clearInterval(state.typewriterInterval);
+      state.typewriterInterval = null;
+
+      // Always remove cursor when typing is complete
+      const formattedContent = formatAIContent(state.currentText);
+      contentEl.innerHTML = formattedContent; // Ensure no cursor
+      contentEl.classList.remove('ai-response-streaming');
+      
+      if (isComplete) {
+        streamingStates.delete(messageId);
+      }
+    }
+  }, 30); // 30ms interval for smooth typing (33 FPS)
 }
 
 // Stream context-aware AI response with real word-by-word streaming
@@ -9162,14 +9828,13 @@ async function saveAIConversation(question, response) {
     const newChatResponse = await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
         type: 'API_CALL',
-        url: '${API_BASE_URL}/api/ai/chats',
+        url: `${API_BASE_URL}/api/ai/chats`,
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
         body: {
           session_id: sessionId,
-          user_id: userId,
           store_chat: true
         }
       }, result => {
@@ -9214,7 +9879,7 @@ async function saveAIConversation(question, response) {
    const userMessageResponse = await new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
       type: 'API_CALL',
-      url: '${API_BASE_URL}/api/ai/messages',
+      url: `${API_BASE_URL}/api/ai/messages`,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -9246,7 +9911,7 @@ async function saveAIConversation(question, response) {
   const aiMessageResponse = await new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
       type: 'API_CALL',
-      url: '${API_BASE_URL}/api/ai/messages',
+      url: `${API_BASE_URL}/api/ai/messages`,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -9279,7 +9944,7 @@ async function saveAIConversation(question, response) {
     await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
         type: 'API_CALL',
-        url: '${API_BASE_URL}/api/ai/interactions',
+        url: `${API_BASE_URL}/api/ai/interactions`,
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -9288,7 +9953,8 @@ async function saveAIConversation(question, response) {
           session_id: sessionId,
           question: question,
           answer: response,
-          model_used: 'enhanced-backend'
+          model: 'enhanced-backend',
+          response_time: Date.now() // You can calculate actual response time
         }
       }, result => {
         if (chrome.runtime.lastError) {
@@ -9353,14 +10019,13 @@ try {
   const chatResponse = await new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
       type: 'API_CALL',
-      url: '${API_BASE_URL}/api/ai/chats',
+      url: `${API_BASE_URL}/api/ai/chats`,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: {
         session_id: sessionId,
-        user_id: userId,
         store_chat: true
       }
     }, result => {
@@ -9434,6 +10099,82 @@ try {
   Logger.error('Error loading previous AI conversations:', error);
   return [];
 }
+}
+
+/**
+* Get all AI interactions for a specific session
+* @param {string} sessionId - The session ID
+* @return {Promise<Array>} - Array of interaction objects
+*/
+async function getSessionAIInteractions(sessionId) {
+  try {
+    const interactionsResponse = await new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        type: 'API_CALL',
+        url: `${API_BASE_URL}/api/ai/interactions/session/${sessionId}`,
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }, result => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve(result);
+        }
+      });
+    });
+
+    if (interactionsResponse && interactionsResponse.ok) {
+      return interactionsResponse.data || [];
+    } else {
+      Logger.error('Failed to fetch session interactions:', interactionsResponse?.error);
+      return [];
+    }
+  } catch (error) {
+    Logger.error('Error loading session AI interactions:', error);
+    return [];
+  }
+}
+
+/**
+* Get all AI interactions for the current user
+* @param {string} sessionId - Optional: filter by specific session
+* @return {Promise<Array>} - Array of interaction objects
+*/
+async function getUserAIInteractions(sessionId = null) {
+  try {
+    const url = sessionId 
+      ? `${API_BASE_URL}/api/ai/interactions/user?session_id=${sessionId}`
+      : `${API_BASE_URL}/api/ai/interactions/user`;
+
+    const interactionsResponse = await new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        type: 'API_CALL',
+        url: url,
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }, result => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve(result);
+        }
+      });
+    });
+
+    if (interactionsResponse && interactionsResponse.ok) {
+      return interactionsResponse.data || [];
+    } else {
+      Logger.error('Failed to fetch user interactions:', interactionsResponse?.error);
+      return [];
+    }
+  } catch (error) {
+    Logger.error('Error loading user AI interactions:', error);
+    return [];
+  }
 }
 
 /**
@@ -9615,43 +10356,164 @@ function addAIMessage(content, isUser, isStreaming = false) {
   return messageId;
 }
 
-// Update AI message content - simplified
-function updateAIMessage(messageId, content, isComplete = true) {
+// Update AI message content with typewriter effect (for standalone AI)
+function updateAIMessage(messageId, newContent, isComplete = true) {
   Logger.log('🔄 updateAIMessage called:', {
     messageId,
-    contentLength: content.length,
+    contentLength: newContent.length,
     isComplete,
-    firstChars: content.substring(0, 50) + '...'
+    firstChars: newContent.substring(0, 50) + '...'
   });
   
   const contentEl = document.getElementById(`content-${messageId}`);
-  if (contentEl) {
-    const formattedContent = formatAIContent(content);
-    contentEl.innerHTML = formattedContent;
-    aiMessages.scrollTop = aiMessages.scrollHeight;
-    Logger.log('✅ DOM updated successfully');
-  } else {
+  if (!contentEl) {
     Logger.error('❌ Could not find content element:', `content-${messageId}`);
+    return;
   }
+
+  // Initialize streaming state for this message
+  if (!streamingStates.has(messageId)) {
+    streamingStates.set(messageId, {
+      currentText: '',
+      targetText: '',
+      isTyping: false,
+      typewriterInterval: null
+    });
+  }
+
+  const state = streamingStates.get(messageId);
+  state.targetText = newContent;
+
+  // Start typewriter effect if not already typing
+  if (!state.isTyping && state.currentText !== state.targetText) {
+    startStandaloneTypewriterEffect(messageId, isComplete);
+  } else if (isComplete) {
+    // Stop any ongoing typing and show final text immediately
+    if (state.typewriterInterval) {
+      clearInterval(state.typewriterInterval);
+      state.typewriterInterval = null;
+    }
+    state.isTyping = false;
+    state.currentText = state.targetText;
+    
+    const formattedContent = formatAIContent(state.currentText);
+    contentEl.innerHTML = formattedContent; // No cursor when complete
+    contentEl.classList.remove('ai-response-streaming');
+    
+    streamingStates.delete(messageId);
+  }
+
+  const aiMessages = document.getElementById('lynkk-ai-messages');
+  if (aiMessages) {
+    aiMessages.scrollTop = aiMessages.scrollHeight;
+  }
+  
+  Logger.log('✅ DOM updated successfully');
 }
 
-// Format AI content with markdown-like styling
+// Typewriter effect for standalone AI messages
+function startStandaloneTypewriterEffect(messageId, isComplete) {
+  const state = streamingStates.get(messageId);
+  if (!state) return;
+
+  const contentEl = document.getElementById(`content-${messageId}`);
+  if (!contentEl) return;
+
+  state.isTyping = true;
+  contentEl.classList.add('ai-response-streaming');
+
+  // Clear any existing interval
+  if (state.typewriterInterval) {
+    clearInterval(state.typewriterInterval);
+  }
+
+  // Start typewriter effect
+  state.typewriterInterval = setInterval(() => {
+    if (state.currentText.length < state.targetText.length) {
+      // Add next character(s) - add multiple chars for faster typing
+      const charsToAdd = Math.min(3, state.targetText.length - state.currentText.length);
+      state.currentText = state.targetText.substring(0, state.currentText.length + charsToAdd);
+      
+      const formattedContent = formatAIContent(state.currentText);
+      const displayContent = formattedContent + '<span class="typing-cursor">|</span>';
+      contentEl.innerHTML = displayContent;
+
+      // Auto-scroll
+      const aiMessages = document.getElementById('lynkk-ai-messages');
+      if (aiMessages) {
+        aiMessages.scrollTop = aiMessages.scrollHeight;
+      }
+    } else {
+      // Typing caught up to target
+      state.isTyping = false;
+      clearInterval(state.typewriterInterval);
+      state.typewriterInterval = null;
+
+      // Always remove cursor when typing is complete
+      const formattedContent = formatAIContent(state.currentText);
+      contentEl.innerHTML = formattedContent; // Ensure no cursor
+      contentEl.classList.remove('ai-response-streaming');
+      
+      if (isComplete) {
+        streamingStates.delete(messageId);
+      }
+    }
+  }, 30); // 30ms interval for smooth typing (33 FPS)
+}
+
+// Enhanced format AI content with better markdown and code support
 function formatAIContent(content) {
+  if (!content) return '';
+  
   return content
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`(.*?)`/g, '<code style="background: #f0f0f0; padding: 2px 4px; border-radius: 3px; font-family: monospace; font-size: 13px;">$1</code>')
-    .replace(/\n\n/g, '</p><p style="margin: 8px 0;">')
+    // Code blocks (```...```)
+    .replace(/```(\w+)?\n?([\s\S]*?)```/g, (match, lang, code) => {
+      const language = lang || 'text';
+      return `<div class="code-block">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #374151;">
+          <span style="color: #10b981; font-size: 12px; font-weight: 600;">${language.toUpperCase()}</span>
+          <button onclick="copyCode(this)" style="background: #374151; color: #f9fafb; border: none; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#4b5563'" onmouseout="this.style.background='#374151'">📋 Copy</button>
+        </div>
+        <pre style="margin: 0; overflow-x: auto;"><code>${code.trim()}</code></pre>
+      </div>`;
+    })
+    // Inline code
+    .replace(/`([^`\n]+)`/g, '<code style="background: #f3f4f6; color: #1f2937; padding: 2px 6px; border-radius: 4px; font-family: Monaco, Menlo, monospace; font-size: 13px; font-weight: 500;">$1</code>')
+    // Bold text
+    .replace(/\*\*(.*?)\*\*/g, '<strong style="font-weight: 600; color: #111827;">$1</strong>')
+    // Italic text
+    .replace(/\*(.*?)\*/g, '<em style="font-style: italic; color: #374151;">$1</em>')
+    // Lists
+    .replace(/^- (.+)$/gm, '<div style="margin: 4px 0; padding-left: 16px; position: relative;"><span style="position: absolute; left: 0; color: #10b981;">•</span> $1</div>')
+    .replace(/^\d+\. (.+)$/gm, '<div style="margin: 4px 0; padding-left: 20px; position: relative;"><span style="position: absolute; left: 0; color: #10b981; font-weight: 600;">1.</span> $1</div>')
+    // Line breaks and paragraphs
+    .replace(/\n\n/g, '</p><p style="margin: 16px 0 0 0;">')
     .replace(/\n/g, '<br>')
     .replace(/^/, '<p style="margin: 0;">')
     .replace(/$/, '</p>');
 }
 
+// Copy code function
+window.copyCode = function(button) {
+  const codeBlock = button.closest('.code-block');
+  const code = codeBlock.querySelector('code').textContent;
+  
+  navigator.clipboard.writeText(code).then(() => {
+    const originalText = button.innerHTML;
+    button.innerHTML = '✅ Copied!';
+    button.style.background = '#059669';
+    setTimeout(() => {
+      button.innerHTML = originalText;
+      button.style.background = '#374151';
+    }, 2000);
+  });
+};
+
 // Stream AI response for standalone assistant that updates context-aware UI
 async function streamStandaloneAIResponseForContextUI(question, messageId) {
   try {
     Logger.log('🚀 Fallback Standalone AI - using generic endpoint:', {
-      endpoint: '${API_BASE_URL}/api/ai-general/general/ask-stream',
+      endpoint: `${API_BASE_URL}/api/ai-general/general/ask-stream`,
       question: question,
       messageId: messageId,
       note: 'Fallback for failed session AI'
@@ -9698,15 +10560,25 @@ async function streamStandaloneAIResponseForContextUI(question, messageId) {
               
               if (parsed.type === 'chunk' && parsed.content) {
                 aiResponse += parsed.content;
+                // Immediate update for responsiveness
                 updateContextAwareAIMessage(messageId, aiResponse, false);
+                
+                // Force immediate DOM update for ChatGPT-like feel
+                setTimeout(() => updateContextAwareAIMessage(messageId, aiResponse, false), 1);
               } else if (parsed.content) {
                 aiResponse += parsed.content;
+                // Immediate update for responsiveness
                 updateContextAwareAIMessage(messageId, aiResponse, false);
+                
+                // Force immediate DOM update for ChatGPT-like feel
+                setTimeout(() => updateContextAwareAIMessage(messageId, aiResponse, false), 1);
               }
             } catch (parseError) {
               if (data.trim()) {
                 aiResponse += data + ' ';
+                // Immediate update even for fallback text
                 updateContextAwareAIMessage(messageId, aiResponse, false);
+                setTimeout(() => updateContextAwareAIMessage(messageId, aiResponse, false), 1);
               }
             }
           }
@@ -9733,7 +10605,7 @@ async function streamStandaloneAIResponse(question, messageId) {
   try {
     
     Logger.log('🚀 Standalone AI - FORCED to generic endpoint:', {
-      endpoint: '${API_BASE_URL}/api/ai-general/general/ask-stream',
+      endpoint: `${API_BASE_URL}/api/ai-general/general/ask-stream`,
       question: question,
       authenticated: !!currentUser,
       note: 'Standalone AI always uses generic endpoint regardless of session status'
@@ -9813,7 +10685,9 @@ async function streamStandaloneAIResponse(question, messageId) {
               if (parsed.type === 'chunk' && parsed.content) {
                 aiResponse += parsed.content;
                 Logger.log('✅ Adding chunk content:', parsed.content, 'Total response:', aiResponse.length, 'chars');
+                // Immediate ChatGPT-like update
                 updateAIMessage(messageId, aiResponse, false);
+                setTimeout(() => updateAIMessage(messageId, aiResponse, false), 1);
                 
                 // Force DOM update
                 setTimeout(() => {
@@ -9826,7 +10700,9 @@ async function streamStandaloneAIResponse(question, messageId) {
               } else if (parsed.content) {
                 aiResponse += parsed.content;
                 Logger.log('✅ Adding direct content:', parsed.content, 'Total response:', aiResponse.length, 'chars');
+                // Immediate ChatGPT-like update
                 updateAIMessage(messageId, aiResponse, false);
+                setTimeout(() => updateAIMessage(messageId, aiResponse, false), 1);
               } else {
                 Logger.log('⚠️ No content found in parsed data:', parsed);
               }
@@ -9975,12 +10851,15 @@ async function streamAIResponse(question, messageId) {
                 // Handle both the expected structure and the actual backend structure
                 if (parsed.type === 'chunk' && parsed.content) {
                   aiResponse += parsed.content;
-                  // Update UI with real-time streaming
+                  // Immediate ChatGPT-like update
                   updateAIMessage(messageId, aiResponse, false);
+                  setTimeout(() => updateAIMessage(messageId, aiResponse, false), 1);
                 } else if (parsed.content) {
                   // Fallback for direct content structure
                   aiResponse += parsed.content;
+                  // Immediate ChatGPT-like update
                   updateAIMessage(messageId, aiResponse, false);
+                  setTimeout(() => updateAIMessage(messageId, aiResponse, false), 1);
                 }
               } catch (parseError) {
                 Logger.warn('Failed to parse SSE data:', data, 'Error:', parseError.message);
